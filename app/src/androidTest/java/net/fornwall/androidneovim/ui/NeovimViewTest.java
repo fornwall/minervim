@@ -3,7 +3,9 @@ package net.fornwall.androidneovim.ui;
 import static org.junit.Assert.*;
 import android.app.Activity;
 import android.content.Intent;
+import android.view.InputDevice;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
@@ -20,9 +22,12 @@ import org.junit.runner.RunWith;
 public class NeovimViewTest {
     private static final class InputLog implements NeovimView.Listener {
         final List<String> keys = new ArrayList<>();
+        final List<String> mouse = new ArrayList<>();
         @Override public void input(String input) { keys.add(input); }
         @Override public void paste(String text) { }
-        @Override public void mouse(String button, String action, String modifiers, int row, int column) { }
+        @Override public void mouse(String button, String action, String modifiers, int row, int column) {
+            mouse.add(button + " " + action + " " + row + "," + column);
+        }
         @Override public void resize(int columns, int rows) { }
     }
 
@@ -40,6 +45,204 @@ public class NeovimViewTest {
             assertEquals(List.of("<C-a>", "<S-Tab>", "<Esc>"), input.keys);
             assertEquals("a<LT>Esc>", NeovimView.literal("a<Esc>"));
         });
+    }
+
+    @Test public void stickyModifiersApplyToOneKeyThenClear() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            List<String> changes = new ArrayList<>();
+            view.setListener(input);
+            view.setModifierListener((ctrl, alt) -> changes.add(ctrl + "," + alt));
+            view.sendKey("i");
+            view.toggleCtrl();
+            view.sendKey("<Left>");
+            view.sendKey("<Left>");
+            view.toggleCtrl();
+            view.toggleCtrl();
+            view.toggleAlt();
+            view.toggleCtrl();
+            view.sendKey(":");
+            view.toggleAlt();
+            view.sendKey("<S-Tab>");
+            view.toggleCtrl();
+            view.sendKey(" ");
+            view.toggleCtrl();
+            view.sendKey("<LT>");
+            view.toggleCtrl();
+            view.sendKey("abc");
+            view.toggleAlt();
+            view.onKeyDown(KeyEvent.KEYCODE_A, new KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0, KeyEvent.META_CTRL_ON));
+            view.toggleCtrl();
+            view.onKeyDown(KeyEvent.KEYCODE_W, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_W));
+            assertEquals(List.of("i", "<C-Left>", "<Left>", "<C-A-:>", "<A-S-Tab>", "<C-Space>", "<C-LT>", "abc", "<C-A-a>", "<C-w>"), input.keys);
+            assertEquals(List.of("true,false", "false,false", "true,false", "false,false", "false,true", "true,true", "false,false",
+                    "false,true", "false,false", "true,false", "false,false", "true,false", "false,false", "true,false", "false,false",
+                    "false,true", "false,false", "true,false", "false,false"), changes);
+        });
+    }
+
+    private static MotionEvent touch(long downTime, long time, int action, float x, float y) {
+        return MotionEvent.obtain(downTime, time, action, x, y, 0);
+    }
+
+    private static NeovimView sizedView(android.content.Context context) {
+        NeovimView view = new NeovimView(context);
+        view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 40, 20)), List.of("flush", List.of())));
+        return view;
+    }
+
+    @Test public void tapClicksAndVerticalDragScrollsWithoutDragging() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            view.setListener(input);
+            for (int style = 0; style < 4; style++) assertTrue("style " + style, view.maximumRun(style) >= 40);
+            float w = view.cellWidth(), h = view.cellHeight();
+            view.onTouchEvent(touch(0, 0, MotionEvent.ACTION_DOWN, 3.5f * w, 2.5f * h));
+            view.onTouchEvent(touch(0, 50, MotionEvent.ACTION_UP, 3.5f * w, 2.5f * h));
+            assertEquals(List.of("left press 2,3", "left release 2,3"), input.mouse);
+            input.mouse.clear();
+            view.onTouchEvent(touch(1000, 1000, MotionEvent.ACTION_DOWN, 5.5f * w, 15.5f * h));
+            for (int i = 1; i <= 13; i++) view.onTouchEvent(touch(1000, 1000 + 200 * i, MotionEvent.ACTION_MOVE, 5.5f * w, (15.5f - i) * h));
+            view.onTouchEvent(touch(1000, 5000, MotionEvent.ACTION_UP, 5.5f * w, 2.5f * h));
+            assertEquals(List.of("wheel down 15,5", "wheel down 15,5", "wheel down 15,5", "wheel down 15,5"), input.mouse);
+            input.mouse.clear();
+            view.onTouchEvent(touch(6000, 6000, MotionEvent.ACTION_DOWN, 20.5f * w, 5.5f * h));
+            for (int i = 1; i <= 13; i++) view.onTouchEvent(touch(6000, 6000 + 200 * i, MotionEvent.ACTION_MOVE, (20.5f + i) * w, 5.5f * h));
+            view.onTouchEvent(touch(6000, 10000, MotionEvent.ACTION_UP, 33.5f * w, 5.5f * h));
+            assertEquals(List.of("wheel left 5,20", "wheel left 5,20"), input.mouse);
+        });
+    }
+
+    @Test public void mouseKeepsButtonsAndPinchZoomsWithoutMouseInput() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        var preferences = instrumentation.getTargetContext().getSharedPreferences("editor", android.content.Context.MODE_PRIVATE);
+        boolean hadSize = preferences.contains("font_size_sp");
+        float savedSize = preferences.getFloat("font_size_sp", 14);
+        try {
+            instrumentation.runOnMainSync(() -> {
+                NeovimView view = sizedView(instrumentation.getTargetContext());
+                InputLog input = new InputLog();
+                view.setListener(input);
+                float w = view.cellWidth(), h = view.cellHeight();
+                for (int action : new int[] {MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP}) {
+                    var properties = new MotionEvent.PointerProperties();
+                    properties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+                    var coordinates = new MotionEvent.PointerCoords();
+                    coordinates.x = (action == MotionEvent.ACTION_DOWN ? 1.5f : 4.5f) * w;
+                    coordinates.y = 1.5f * h;
+                    MotionEvent event = MotionEvent.obtain(0, 10, action, 1, new MotionEvent.PointerProperties[] {properties},
+                            new MotionEvent.PointerCoords[] {coordinates}, 0, MotionEvent.BUTTON_SECONDARY, 1, 1, 0, 0,
+                            InputDevice.SOURCE_MOUSE, 0);
+                    view.onTouchEvent(event);
+                    event.recycle();
+                }
+                assertEquals(List.of("right press 1,1", "right drag 1,4", "right release 1,4"), input.mouse);
+                input.mouse.clear();
+                float before = view.fontSize();
+                long t = 0;
+                view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300));
+                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300));
+                for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 40 * i));
+                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 700));
+                view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 700));
+                assertTrue(view.fontSize() > before);
+                assertTrue(view.fontSize() <= 32);
+                assertTrue(input.mouse.isEmpty());
+            });
+        } finally {
+            if (hadSize) preferences.edit().putFloat("font_size_sp", savedSize).commit();
+            else preferences.edit().remove("font_size_sp").commit();
+        }
+    }
+
+    /** Two fingers {@code span} pixels apart, centred at (500, 500). */
+    private static MotionEvent pinch(long time, int action, int pointers, float span) {
+        var properties = new MotionEvent.PointerProperties[pointers];
+        var coordinates = new MotionEvent.PointerCoords[pointers];
+        for (int i = 0; i < pointers; i++) {
+            properties[i] = new MotionEvent.PointerProperties();
+            properties[i].id = i;
+            properties[i].toolType = MotionEvent.TOOL_TYPE_FINGER;
+            coordinates[i] = new MotionEvent.PointerCoords();
+            coordinates[i].x = 500 + (i == 0 ? -span : span) / 2;
+            coordinates[i].y = 500;
+        }
+        return MotionEvent.obtain(0, time, action, pointers, properties, coordinates, 0, 0, 1, 1, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0);
+    }
+
+    @Test public void longPressDragSelectsAndCancelReleases() throws Exception {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = instrumentation.startActivitySync(intent);
+        try {
+            InputLog input = new InputLog();
+            NeovimView[] holder = new NeovimView[1];
+            instrumentation.runOnMainSync(() -> {
+                NeovimView view = sizedView(activity);
+                holder[0] = view;
+                activity.addContentView(view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            });
+            instrumentation.waitForIdleSync();
+            NeovimView view = holder[0];
+            float w = view.cellWidth(), h = view.cellHeight();
+            instrumentation.runOnMainSync(() -> {
+                view.setListener(input);
+                view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 40, 20)), List.of("flush", List.of())));
+                float top = Math.max(0, (int) ((view.getHeight() - 20 * h) / 2));
+                long now = android.os.SystemClock.uptimeMillis();
+                view.onTouchEvent(touch(now, now, MotionEvent.ACTION_DOWN, 2.5f * w, top + 1.5f * h));
+            });
+            Thread.sleep(android.view.ViewConfiguration.getLongPressTimeout() + 300);
+            instrumentation.runOnMainSync(() -> {
+                float top = Math.max(0, (int) ((view.getHeight() - 20 * h) / 2));
+                long now = android.os.SystemClock.uptimeMillis();
+                view.onTouchEvent(touch(now, now, MotionEvent.ACTION_MOVE, 6.5f * w, top + 3.5f * h));
+                view.onTouchEvent(touch(now, now + 10, MotionEvent.ACTION_CANCEL, 6.5f * w, top + 3.5f * h));
+                assertEquals(List.of("left press 1,2", "left drag 3,6", "left release 3,6"), input.mouse);
+                ((ViewGroup) view.getParent()).removeView(view);
+            });
+        } finally {
+            instrumentation.runOnMainSync(activity::finish);
+        }
+    }
+
+    @Test public void stickyModifiersApplyToSingleImeCommits() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = instrumentation.startActivitySync(intent);
+        try {
+            instrumentation.runOnMainSync(() -> {
+                NeovimView view = new NeovimView(activity);
+                InputLog input = new InputLog();
+                List<String> changes = new ArrayList<>();
+                activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));
+                view.setListener(input);
+                view.setModifierListener((ctrl, alt) -> changes.add(ctrl + "," + alt));
+                view.requestFocus();
+                InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+                view.toggleCtrl();
+                assertTrue(connection.finishComposingText());
+                assertTrue(connection.commitText("w", 1));
+                assertTrue(connection.commitText("w", 1));
+                view.toggleCtrl();
+                assertTrue(connection.commitText("hi", 1));
+                view.toggleAlt();
+                assertTrue(connection.commitText("<", 1));
+                view.toggleCtrl();
+                ((ViewGroup) view.getParent()).removeView(view);
+                assertEquals(List.of("<C-w>", "w", "hi", "<A-LT>"), input.keys);
+                assertEquals(List.of("true,false", "false,false", "true,false", "false,false", "false,true", "false,false",
+                        "true,false", "false,false"), changes);
+            });
+        } finally {
+            instrumentation.runOnMainSync(activity::finish);
+        }
     }
 
     @Test public void screenTextAndAccessibilityObserveOnlyFlushedFrames() {

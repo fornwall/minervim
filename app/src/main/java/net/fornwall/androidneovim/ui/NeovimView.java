@@ -5,20 +5,28 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Looper;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.TypedValue;
+import android.view.HapticFeedbackConstants;
+import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.OverScroller;
 import android.widget.Toast;
 import java.util.List;
 
@@ -30,14 +38,27 @@ public final class NeovimView extends View {
         void mouse(String button, String action, String modifiers, int row, int column);
         void resize(int columns, int rows);
     }
+    public interface ModifierListener { void onModifiersChanged(boolean ctrl, boolean alt); }
 
+    private static final String ASCII = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    private static final int TOUCH_IDLE = 0, TOUCH_PENDING = 1, TOUCH_SCROLL = 2, TOUCH_SELECT = 3, TOUCH_PINCH = 4;
+    // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
+    private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     private final NeovimGrid grid = new NeovimGrid();
     private final Paint[] textPaints = new Paint[4];
+    private final int[] maximumRun = new int[4];
     private final Paint fill = new Paint();
-    private final float cellWidth;
-    private final float cellHeight;
-    private final float baseline;
+    private final Paint curl = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path curlPath = new Path();
+    private char[] run = new char[256];
+    private float fontSize;
+    private float cellWidth;
+    private float cellHeight;
+    private float baseline;
     private Listener listener;
+    private ModifierListener modifierListener;
+    private boolean stickyCtrl;
+    private boolean stickyAlt;
     private int columns = 80;
     private int rows = 24;
     private int connectionGeneration;
@@ -47,6 +68,18 @@ public final class NeovimView extends View {
     private int pressedRow;
     private int pressedColumn;
     private float wheelRemainder;
+    private final ScaleGestureDetector scaleDetector;
+    private final OverScroller scroller;
+    private final int touchSlop;
+    private final int minimumFling;
+    private final int maximumFling;
+    private final Runnable longPress = this::startSelection;
+    private final Runnable flingStep = this::flingStep;
+    private VelocityTracker velocity;
+    private int touchState;
+    private boolean horizontalScroll;
+    private float downX, downY, lastX, lastY, scrollX, scrollY;
+    private int touchRow, touchColumn, flingX, flingY;
 
     public NeovimView(Context context) {
         super(context);
@@ -54,19 +87,72 @@ public final class NeovimView extends View {
         setFocusableInTouchMode(true);
         setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         setContentDescription("Neovim editor");
-        float textSize = 14 * getResources().getDisplayMetrics().scaledDensity;
         for (int style = 0; style < textPaints.length; style++) {
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
             paint.setTypeface(Typeface.create(Typeface.MONOSPACE, style));
-            paint.setTextSize(textSize);
+            // Neovim owns cell placement, so batched runs must not kern or ligate.
+            paint.setFontFeatureSettings("'kern' 0, 'liga' 0, 'clig' 0, 'calt' 0");
             textPaints[style] = paint;
         }
+        curl.setStyle(Paint.Style.STROKE);
+        curl.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
+        fontSize = clampFontSize(context.getSharedPreferences("editor", Context.MODE_PRIVATE).getFloat("font_size_sp", 14));
+        applyFontSize();
+        ViewConfiguration configuration = ViewConfiguration.get(context);
+        touchSlop = configuration.getScaledTouchSlop();
+        minimumFling = configuration.getScaledMinimumFlingVelocity();
+        maximumFling = configuration.getScaledMaximumFlingVelocity();
+        scroller = new OverScroller(context);
+        scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override public boolean onScale(ScaleGestureDetector detector) {
+                setFontSize(fontSize * detector.getScaleFactor());
+                return true;
+            }
+            @Override public void onScaleEnd(ScaleGestureDetector detector) {
+                getContext().getSharedPreferences("editor", Context.MODE_PRIVATE).edit().putFloat("font_size_sp", fontSize).apply();
+            }
+        });
+        scaleDetector.setQuickScaleEnabled(false);
+    }
+
+    private static float clampFontSize(float size) { return Float.isNaN(size) ? 14 : Math.max(8, Math.min(32, size)); }
+
+    /** Sets the font size in sp, clamped to 8–32, and resizes the Neovim grid to fit. */
+    public void setFontSize(float size) {
+        size = clampFontSize(size);
+        if (size == fontSize) return;
+        fontSize = size;
+        applyFontSize();
+        updateGridSize();
+        invalidate();
+    }
+    public float fontSize() { return fontSize; }
+
+    private void applyFontSize() {
+        float textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSize, getResources().getDisplayMetrics());
+        for (Paint paint : textPaints) { paint.setTextSize(textSize); paint.setTextScaleX(1); }
         // Keep fractional advances, matching android-ssh's TerminalMetrics approach.
         cellWidth = textPaints[0].measureText("MMMMMMMMMM") / 10;
         Paint.FontMetrics metrics = textPaints[0].getFontMetrics();
         cellHeight = (float) Math.ceil(metrics.descent - metrics.ascent);
         baseline = cellHeight - metrics.descent;
+        // Styles may use other faces (italic is narrower) and advances are quantized, so each style is scaled
+        // to the cell; ASCII runs are then bounded so that accumulated advance error stays below 1/4 pixel.
+        float[] advances = new float[ASCII.length()];
+        for (int style = 0; style < textPaints.length; style++) {
+            Paint paint = textPaints[style];
+            paint.getTextWidths(ASCII, advances);
+            paint.setTextScaleX(cellWidth / advances['M' - ' ']);
+            paint.getTextWidths(ASCII, advances);
+            float error = 0;
+            for (float advance : advances) error = Math.max(error, Math.abs(advance - cellWidth));
+            maximumRun[style] = error < 1e-4f ? Integer.MAX_VALUE : (int) (0.25f / error);
+        }
     }
+
+    float cellWidth() { return cellWidth; }
+    float cellHeight() { return cellHeight; }
+    int maximumRun(int style) { return maximumRun[style]; }
 
     public void setListener(Listener listener) {
         this.listener = listener;
@@ -77,13 +163,17 @@ public final class NeovimView extends View {
 
     public void handleRedraw(List<?> events) {
         if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Redraw must run on main thread");
-        if (grid.handleRedraw(events)) postInvalidateOnAnimation();
+        if (!grid.handleRedraw(events)) return;
+        if (run.length < grid.frame().columns) run = new char[grid.frame().columns];
+        postInvalidateOnAnimation();
     }
 
-    @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
-        if (width <= 0 || height <= 0) return;
-        int newColumns = Math.max(1, (int) (width / cellWidth));
-        int newRows = Math.max(1, (int) (height / cellHeight));
+    @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) { updateGridSize(); }
+
+    private void updateGridSize() {
+        if (getWidth() <= 0 || getHeight() <= 0) return;
+        int newColumns = Math.max(1, (int) (getWidth() / cellWidth));
+        int newRows = Math.max(1, (int) (getHeight() / cellHeight));
         if (newColumns != columns || newRows != rows) {
             columns = newColumns;
             rows = newRows;
@@ -92,6 +182,8 @@ public final class NeovimView extends View {
     }
 
     private float gridTop() { return Math.max(0, (int) ((getHeight() - grid.frame().rows * cellHeight) / 2)); }
+    private int row(float y) { return Math.max(0, Math.min(grid.frame().rows - 1, (int) ((y - gridTop()) / cellHeight))); }
+    private int column(float x) { return Math.max(0, Math.min(grid.frame().columns - 1, (int) (x / cellWidth))); }
 
     @Override protected void onDraw(Canvas canvas) {
         NeovimGrid.Frame frame = grid.frame();
@@ -101,27 +193,29 @@ public final class NeovimView extends View {
         int visibleColumns = Math.min(frame.columns, (int) Math.ceil(getWidth() / cellWidth));
         // Backgrounds precede all glyphs, so the continuation cell cannot erase a wide glyph.
         for (int row = 0; row < visibleRows; row++) {
-            for (int column = 0; column < visibleColumns; column++) {
-                NeovimGrid.Highlight highlight = frame.highlight(row, column);
-                fill.setColor(frame.background(highlight));
-                canvas.drawRect(column * cellWidth, top + row * cellHeight,
-                        (column + 1) * cellWidth, top + (row + 1) * cellHeight, fill);
+            float y = top + row * cellHeight;
+            for (int start = 0, end; start < visibleColumns; start = end) {
+                int color = frame.background(frame.highlight(row, start));
+                for (end = start + 1; end < visibleColumns && frame.background(frame.highlight(row, end)) == color; end++) { }
+                if (color == frame.background) continue;
+                fill.setColor(color);
+                canvas.drawRect(start * cellWidth, y, end * cellWidth, y + cellHeight, fill);
             }
         }
-        for (int row = 0; row < visibleRows; row++) {
-            for (int column = 0; column < visibleColumns; column++) drawCell(canvas, frame, row, column, top, false);
-        }
+        for (int row = 0; row < visibleRows; row++) drawRow(canvas, frame, row, top + row * cellHeight, visibleColumns);
         if (!frame.busy && frame.cursorRow >= 0 && frame.cursorRow < visibleRows
                 && frame.cursorColumn >= 0 && frame.cursorColumn < visibleColumns) {
             float x = frame.cursorColumn * cellWidth;
             float y = top + frame.cursorRow * cellHeight;
-            fill.setColor(frame.foreground);
+            fill.setColor(frame.cursorBackground());
             switch (frame.cursorShape) {
                 case "vertical" -> canvas.drawRect(x, y, x + Math.max(1, cellWidth * frame.cursorPercentage / 100), y + cellHeight, fill);
                 case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, x + cellWidth, y + cellHeight, fill);
                 default -> {
-                    canvas.drawRect(x, y, x + cellWidth, y + cellHeight, fill);
-                    drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, top, true);
+                    canvas.drawRect(x, y, x + cellSpan(frame, frame.cursorRow, frame.cursorColumn) * cellWidth, y + cellHeight, fill);
+                    Paint paint = paint(frame.highlight(frame.cursorRow, frame.cursorColumn));
+                    paint.setColor(frame.cursorForeground());
+                    drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, paint);
                 }
             }
             if (!composition.isEmpty()) {
@@ -137,28 +231,123 @@ public final class NeovimView extends View {
         }
     }
 
-    private void drawCell(Canvas canvas, NeovimGrid.Frame frame, int row, int column, float top, boolean cursor) {
+    private static int style(NeovimGrid.Highlight highlight) { return (highlight.bold ? Typeface.BOLD : 0) | (highlight.italic ? Typeface.ITALIC : 0); }
+    private Paint paint(NeovimGrid.Highlight highlight) { return textPaints[style(highlight)]; }
+    private static int cellSpan(NeovimGrid.Frame frame, int row, int column) {
+        return column + 1 < frame.columns && frame.text(row, column + 1).isEmpty() ? 2 : 1;
+    }
+
+    /** Draws each equally highlighted span: printable ASCII as text runs, other glyphs clipped per cell. */
+    private void drawRow(Canvas canvas, NeovimGrid.Frame frame, int row, float y, int visibleColumns) {
+        for (int start = 0, end; start < visibleColumns; start = end) {
+            int attribute = frame.attribute(row, start);
+            for (end = start + 1; end < visibleColumns && frame.attribute(row, end) == attribute; end++) { }
+            NeovimGrid.Highlight highlight = frame.highlight(attribute);
+            drawDecorations(canvas, frame, highlight, start * cellWidth, end * cellWidth, y);
+            Paint paint = paint(highlight);
+            paint.setColor(frame.foreground(highlight));
+            int limit = maximumRun[style(highlight)];
+            int runStart = -1, length = 0, trimmed = 0;
+            for (int column = start; column < end; column++) {
+                String text = frame.text(row, column);
+                char c = text.length() == 1 ? text.charAt(0) : 0;
+                if (limit > 1 && c >= ' ' && c < 0x7f) {
+                    if (length == limit) {
+                        drawRun(canvas, runStart, trimmed, y, paint);
+                        runStart = -1;
+                        length = trimmed = 0;
+                    }
+                    if (runStart < 0) {
+                        if (c == ' ') continue;
+                        runStart = column;
+                    }
+                    run[length++] = c;
+                    if (c != ' ') trimmed = length;
+                    continue;
+                }
+                drawRun(canvas, runStart, trimmed, y, paint);
+                runStart = -1;
+                length = trimmed = 0;
+                drawCell(canvas, frame, row, column, y, paint);
+            }
+            drawRun(canvas, runStart, trimmed, y, paint);
+        }
+    }
+
+    private void drawRun(Canvas canvas, int column, int length, float y, Paint paint) {
+        if (length > 0) canvas.drawTextRun(run, 0, length, 0, length, column * cellWidth, y + baseline, false, paint);
+    }
+
+    private void drawDecorations(Canvas canvas, NeovimGrid.Frame frame, NeovimGrid.Highlight highlight, float left, float right, float y) {
+        if (!highlight.underline && !highlight.undercurl && !highlight.strikethrough) return;
+        int color = frame.special(highlight);
+        fill.setColor(color);
+        if (highlight.underline) canvas.drawRect(left, y + cellHeight - 1, right, y + cellHeight, fill);
+        if (highlight.strikethrough) canvas.drawRect(left, y + cellHeight / 2, right, y + cellHeight / 2 + 1, fill);
+        if (highlight.undercurl) {
+            float amplitude = Math.max(1, cellHeight / 16), half = cellWidth / 2;
+            float middle = y + cellHeight - amplitude - curl.getStrokeWidth() / 2;
+            curlPath.rewind();
+            curlPath.moveTo(left, middle);
+            for (float x = left, sign = -1; x < right - 0.5f; x += half, sign = -sign) {
+                curlPath.quadTo(x + half / 2, middle + 2 * sign * amplitude, x + half, middle);
+            }
+            curl.setColor(color);
+            canvas.drawPath(curlPath, curl);
+        }
+    }
+
+    private void drawCell(Canvas canvas, NeovimGrid.Frame frame, int row, int column, float y, Paint paint) {
         String text = frame.text(row, column);
-        if (text.isEmpty()) return;
-        NeovimGrid.Highlight highlight = frame.highlight(row, column);
-        Paint paint = textPaints[(highlight.bold ? Typeface.BOLD : 0) | (highlight.italic ? Typeface.ITALIC : 0)];
-        paint.setColor(cursor ? frame.background : frame.foreground(highlight));
+        if (text.isBlank()) return;
         float x = column * cellWidth;
-        float y = top + row * cellHeight;
-        int width = column + 1 < frame.columns && frame.text(row, column + 1).isEmpty() ? 2 : 1;
         int saved = canvas.save();
-        canvas.clipRect(x, y, x + width * cellWidth, y + cellHeight);
+        canvas.clipRect(x, y, x + cellSpan(frame, row, column) * cellWidth, y + cellHeight);
         // Explicit LTR shaping follows TerminalRowPainter; Neovim owns cell order.
         canvas.drawTextRun(text, 0, text.length(), 0, text.length(), x, y + baseline, false, paint);
-        fill.setColor(frame.special(highlight));
-        if (highlight.underline) canvas.drawRect(x, y + cellHeight - 1, x + width * cellWidth, y + cellHeight, fill);
-        if (highlight.strikethrough) canvas.drawRect(x, y + cellHeight / 2, x + width * cellWidth, y + cellHeight / 2 + 1, fill);
         canvas.restoreToCount(saved);
     }
 
+    public void setModifierListener(ModifierListener listener) { modifierListener = listener; }
+    public void toggleCtrl() { stickyCtrl = !stickyCtrl; notifyModifiers(); }
+    public void toggleAlt() { stickyAlt = !stickyAlt; notifyModifiers(); }
+    private void notifyModifiers() { if (modifierListener != null) modifierListener.onModifiersChanged(stickyCtrl, stickyAlt); }
+    private void clearModifiers() {
+        if (!stickyCtrl && !stickyAlt) return;
+        stickyCtrl = stickyAlt = false;
+        notifyModifiers();
+    }
+
+    /** Sends Neovim key notation. Active sticky modifiers apply to a single key, then clear. */
     public void sendKey(String keys) {
         cancelComposition();
+        input(keys);
+    }
+
+    private void input(String keys) {
+        if (stickyCtrl || stickyAlt) {
+            keys = modified(keys, stickyCtrl, stickyAlt);
+            clearModifiers();
+        }
         if (listener != null) listener.input(keys);
+    }
+
+    /** Adds modifiers to one key such as {@code <S-Tab>} or {@code :}; other input is returned unchanged. */
+    static String modified(String keys, boolean ctrl, boolean alt) {
+        String key, existing = "";
+        int last = keys.length() - 1;
+        if (last > 1 && keys.charAt(0) == '<' && keys.indexOf('<', 1) < 0 && keys.indexOf('>') == last) {
+            key = keys.substring(1, last);
+            while (key.length() > 2 && key.charAt(1) == '-' && "CAMDS".indexOf(Character.toUpperCase(key.charAt(0))) >= 0) {
+                existing += Character.toUpperCase(key.charAt(0));
+                key = key.substring(2);
+            }
+        } else if (!keys.isEmpty() && keys.codePointCount(0, keys.length()) == 1) {
+            key = keys.equals(" ") ? "Space" : keys;
+        } else return keys;
+        return "<" + (ctrl || existing.contains("C") ? "C-" : "")
+                + (alt || existing.contains("A") || existing.contains("M") ? "A-" : "")
+                + (existing.contains("D") ? "D-" : "") + (existing.contains("S") ? "S-" : "") + key + ">";
     }
 
     public void pasteClipboard() {
@@ -227,7 +416,7 @@ public final class NeovimView extends View {
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
                 composition = "";
-                if (text != null && listener != null) listener.input(literal(text.toString()));
+                if (text != null && text.length() > 0) input(literal(text.toString()));
                 invalidate();
                 return true;
             }
@@ -261,7 +450,7 @@ public final class NeovimView extends View {
             @Override public boolean sendKeyEvent(KeyEvent event) { return active() && dispatchKeyEvent(event); }
             @Override public boolean performEditorAction(int action) {
                 if (!active()) return false;
-                if (listener != null) listener.input("<CR>");
+                input("<CR>");
                 return true;
             }
             @Override public void closeConnection() {
@@ -321,17 +510,18 @@ public final class NeovimView extends View {
             return true;
         }
         if (unicode == 0) return super.onKeyDown(keyCode, event);
+        cancelComposition();
         if (pendingAccent != 0) {
             int combined = KeyCharacterMap.getDeadChar(pendingAccent, unicode);
             if (combined != 0) unicode = combined;
-            else sendKey(literal(new String(Character.toChars(pendingAccent))));
+            else if (listener != null) listener.input(literal(new String(Character.toChars(pendingAccent))));
             pendingAccent = 0;
         }
         String text = new String(Character.toChars(unicode));
         if (modified) {
             String key = unicode == ' ' ? "Space" : unicode == '<' ? "LT" : text;
-            sendKey("<" + modifiers(event, false) + key + ">");
-        } else sendKey(literal(text));
+            input("<" + modifiers(event, false) + key + ">");
+        } else input(literal(text));
         return true;
     }
 
@@ -346,18 +536,142 @@ public final class NeovimView extends View {
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
-        int row = Math.max(0, Math.min(grid.frame().rows - 1, (int) ((event.getY() - gridTop()) / cellHeight)));
-        int column = Math.max(0, Math.min(grid.frame().columns - 1, (int) (event.getX() / cellWidth)));
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) return mouseEvent(event);
+        scaleDetector.onTouchEvent(event);
+        if (velocity != null) velocity.addMovement(event);
+        float x = event.getX(), y = event.getY();
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN -> {
                 requestFocus();
                 cancelComposition();
+                stopFling();
+                touchState = TOUCH_PENDING;
+                downX = lastX = x;
+                downY = lastY = y;
+                scrollX = scrollY = 0;
+                touchRow = row(y);
+                touchColumn = column(x);
+                if (velocity == null) velocity = VelocityTracker.obtain();
+                velocity.clear();
+                velocity.addMovement(event);
+                postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
+            }
+            case MotionEvent.ACTION_POINTER_DOWN -> {
+                // Pinch owns the rest of the gesture: no tap, scroll or selection.
+                removeCallbacks(longPress);
+                releaseMouse();
+                touchState = TOUCH_PINCH;
+            }
+            case MotionEvent.ACTION_MOVE -> {
+                if (touchState == TOUCH_PENDING && Math.hypot(x - downX, y - downY) > touchSlop) {
+                    removeCallbacks(longPress);
+                    touchState = TOUCH_SCROLL;
+                    horizontalScroll = Math.abs(x - downX) > Math.abs(y - downY);
+                }
+                if (touchState == TOUCH_SCROLL) {
+                    scroll(x - lastX, y - lastY);
+                    lastX = x;
+                    lastY = y;
+                } else if (touchState == TOUCH_SELECT) {
+                    int row = row(y), column = column(x);
+                    if (row != pressedRow || column != pressedColumn) {
+                        pressedRow = row;
+                        pressedColumn = column;
+                        if (listener != null) listener.mouse("left", "drag", "", row, column);
+                    }
+                }
+            }
+            case MotionEvent.ACTION_UP -> {
+                removeCallbacks(longPress);
+                if (touchState == TOUCH_PENDING) {
+                    if (listener != null) {
+                        listener.mouse("left", "press", "", touchRow, touchColumn);
+                        listener.mouse("left", "release", "", touchRow, touchColumn);
+                    }
+                    performClick();
+                    showKeyboard();
+                } else if (touchState == TOUCH_SCROLL) {
+                    velocity.computeCurrentVelocity(1000, maximumFling);
+                    int vx = horizontalScroll ? (int) velocity.getXVelocity() : 0, vy = horizontalScroll ? 0 : (int) velocity.getYVelocity();
+                    if (Math.abs(vx) + Math.abs(vy) > minimumFling) {
+                        flingX = flingY = 0;
+                        scroller.fling(0, 0, vx, vy, -1_000_000, 1_000_000, -1_000_000, 1_000_000);
+                        postOnAnimation(flingStep);
+                    }
+                }
+                releaseMouse();
+                endTouch();
+            }
+            case MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(longPress);
+                releaseMouse();
+                endTouch();
+            }
+            default -> { }
+        }
+        return true;
+    }
+
+    private void endTouch() {
+        touchState = TOUCH_IDLE;
+        if (velocity != null) { velocity.recycle(); velocity = null; }
+    }
+
+    private void startSelection() {
+        if (touchState != TOUCH_PENDING) return;
+        touchState = TOUCH_SELECT;
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        pressedButton = "left";
+        pressedRow = touchRow;
+        pressedColumn = touchColumn;
+        if (listener != null) listener.mouse("left", "press", "", touchRow, touchColumn);
+    }
+
+    /** Converts finger movement to wheel events so content roughly follows the finger. */
+    private void scroll(float dx, float dy) {
+        if (horizontalScroll) {
+            float step = WHEEL_COLUMNS * cellWidth;
+            int ticks = (int) ((scrollX += dx) / step);
+            scrollX -= ticks * step;
+            wheel(ticks > 0 ? "left" : "right", Math.abs(ticks));
+        } else {
+            float step = WHEEL_LINES * cellHeight;
+            int ticks = (int) ((scrollY += dy) / step);
+            scrollY -= ticks * step;
+            wheel(ticks > 0 ? "up" : "down", Math.abs(ticks));
+        }
+    }
+
+    private void wheel(String direction, int ticks) {
+        if (listener == null) return;
+        for (int i = 0; i < Math.min(32, ticks); i++) listener.mouse("wheel", direction, "", touchRow, touchColumn);
+    }
+
+    private void flingStep() {
+        if (!scroller.computeScrollOffset()) return;
+        scroll(scroller.getCurrX() - flingX, scroller.getCurrY() - flingY);
+        flingX = scroller.getCurrX();
+        flingY = scroller.getCurrY();
+        postOnAnimation(flingStep);
+    }
+
+    private void stopFling() {
+        scroller.forceFinished(true);
+        removeCallbacks(flingStep);
+    }
+
+    private boolean mouseEvent(MotionEvent event) {
+        int row = row(event.getY()), column = column(event.getX());
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN -> {
+                requestFocus();
+                cancelComposition();
+                stopFling();
                 pressedButton = (event.getButtonState() & MotionEvent.BUTTON_SECONDARY) != 0 ? "right"
                         : (event.getButtonState() & MotionEvent.BUTTON_TERTIARY) != 0 ? "middle" : "left";
                 pressedRow = row;
                 pressedColumn = column;
                 if (listener != null) listener.mouse(pressedButton, "press", "", row, column);
-                return true;
             }
             case MotionEvent.ACTION_MOVE -> {
                 if (pressedButton != null && (row != pressedRow || column != pressedColumn)) {
@@ -365,16 +679,15 @@ public final class NeovimView extends View {
                     pressedColumn = column;
                     if (listener != null) listener.mouse(pressedButton, "drag", "", row, column);
                 }
-                return true;
             }
             case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (pressedButton != null && listener != null) listener.mouse(pressedButton, "release", "", row, column);
                 pressedButton = null;
                 if (event.getActionMasked() == MotionEvent.ACTION_UP) { performClick(); showKeyboard(); }
-                return true;
             }
-            default -> { return true; }
+            default -> { }
         }
+        return true;
     }
 
     @Override public boolean performClick() { super.performClick(); return true; }
@@ -384,27 +697,34 @@ public final class NeovimView extends View {
         wheelRemainder += event.getAxisValue(MotionEvent.AXIS_VSCROLL);
         int ticks = Math.max(-32, Math.min(32, (int) wheelRemainder));
         wheelRemainder -= ticks;
-        int row = Math.max(0, Math.min(grid.frame().rows - 1, (int) ((event.getY() - gridTop()) / cellHeight)));
-        int column = Math.max(0, Math.min(grid.frame().columns - 1, (int) (event.getX() / cellWidth)));
+        int row = row(event.getY()), column = column(event.getX());
         for (int i = 0; i < Math.abs(ticks); i++) listener.mouse("wheel", ticks > 0 ? "up" : "down", "", row, column);
         return true;
     }
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {
         super.onFocusChanged(focused, direction, previous);
-        if (!focused) { releaseMouse(); pendingAccent = 0; composition = ""; connectionGeneration++; invalidate(); }
+        if (!focused) { resetInput(); invalidate(); }
     }
+
     private void releaseMouse() {
         if (pressedButton != null && listener != null) listener.mouse(pressedButton, "release", "", pressedRow, pressedColumn);
         pressedButton = null;
     }
 
-    @Override protected void onDetachedFromWindow() {
+    private void resetInput() {
+        removeCallbacks(longPress);
+        stopFling();
         releaseMouse();
-        connectionGeneration++;
-        composition = "";
+        endTouch();
+        clearModifiers();
         pendingAccent = 0;
-        pressedButton = null;
+        composition = "";
+        connectionGeneration++;
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        resetInput();
         super.onDetachedFromWindow();
     }
 }

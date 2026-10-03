@@ -1,7 +1,6 @@
 package net.fornwall.androidneovim.ui;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -13,7 +12,8 @@ public final class NeovimGrid {
     private int rows = 1;
     private String[][] text = {{" "}};
     private int[][] attributes = {{0}};
-    private final Map<Integer, Highlight> highlights = new HashMap<>();
+    private Highlight[] highlights = new Highlight[64];
+    private boolean highlightsShared;
     private int foreground = 0xffd4d4d4;
     private int background = 0xff181818;
     private int special = foreground;
@@ -21,6 +21,8 @@ public final class NeovimGrid {
     private int cursorColumn;
     private String cursorShape = "block";
     private int cursorPercentage = 25;
+    private int cursorAttribute;
+    private int mode = -1;
     private List<?> modes = List.of();
     private boolean busy;
     private Frame frame = snapshot();
@@ -62,7 +64,12 @@ public final class NeovimGrid {
                     case "hl_attr_define" -> {
                         int id = integer(args, 0);
                         if (id >= 0 && id < MAX_HIGHLIGHTS && args.get(1) instanceof Map<?, ?> style) {
-                            highlights.put(id, new Highlight(style));
+                            // Published frames share the table until the next definition (copy on write).
+                            if (highlightsShared || id >= highlights.length) {
+                                highlights = Arrays.copyOf(highlights, Math.max(highlights.length, Math.min(MAX_HIGHLIGHTS, 2 * id + 2)));
+                                highlightsShared = false;
+                            }
+                            highlights[id] = new Highlight(style);
                         }
                     }
                     case "mode_info_set" -> {
@@ -70,15 +77,12 @@ public final class NeovimGrid {
                         if (args.get(1) instanceof List<?> list) {
                             modes = list.stream().map(item -> item instanceof Map<?, ?> map
                                     ? Map.copyOf(map) : Map.of()).toList();
+                            applyMode();
                         }
                     }
                     case "mode_change" -> {
-                        int index = integer(args, 1);
-                        if (index >= 0 && index < modes.size() && modes.get(index) instanceof Map<?, ?> mode) {
-                            Object shape = mode.get("cursor_shape");
-                            cursorShape = shape instanceof String s ? s : "block";
-                            cursorPercentage = Math.max(1, Math.min(100, mapInteger(mode, "cell_percentage", 25)));
-                        }
+                        mode = integer(args, 1);
+                        applyMode();
                     }
                     case "busy_start" -> busy = true;
                     case "busy_stop" -> busy = false;
@@ -91,6 +95,13 @@ public final class NeovimGrid {
             }
         }
         return flushed;
+    }
+
+    private void applyMode() {
+        if (mode < 0 || mode >= modes.size() || !(modes.get(mode) instanceof Map<?, ?> info)) return;
+        cursorShape = info.get("cursor_shape") instanceof String shape ? shape : "block";
+        cursorPercentage = Math.max(1, Math.min(100, mapInteger(info, "cell_percentage", 25)));
+        cursorAttribute = Math.max(0, mapInteger(info, "attr_id", 0));
     }
 
     private void resize(int width, int height) {
@@ -175,8 +186,9 @@ public final class NeovimGrid {
             copiedText[row] = text[row].clone();
             copiedAttributes[row] = attributes[row].clone();
         }
-        return new Frame(columns, rows, copiedText, copiedAttributes, Map.copyOf(highlights), foreground,
-                background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, busy);
+        highlightsShared = true;
+        return new Frame(columns, rows, copiedText, copiedAttributes, highlights, foreground,
+                background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy);
     }
 
     private static int integer(List<?> list, int index) { return ((Number) list.get(index)).intValue(); }
@@ -193,6 +205,7 @@ public final class NeovimGrid {
         final boolean bold;
         final boolean italic;
         final boolean underline;
+        final boolean undercurl;
         final boolean strikethrough;
         Highlight(Map<?, ?> style) {
             foreground = mapInteger(style, "foreground", -1);
@@ -201,32 +214,37 @@ public final class NeovimGrid {
             reverse = Boolean.TRUE.equals(style.get("reverse"));
             bold = Boolean.TRUE.equals(style.get("bold"));
             italic = Boolean.TRUE.equals(style.get("italic"));
-            underline = Boolean.TRUE.equals(style.get("underline")) || Boolean.TRUE.equals(style.get("undercurl"))
-                    || Boolean.TRUE.equals(style.get("underdouble")) || Boolean.TRUE.equals(style.get("underdotted"))
+            undercurl = Boolean.TRUE.equals(style.get("undercurl"));
+            underline = Boolean.TRUE.equals(style.get("underline")) || Boolean.TRUE.equals(style.get("underdouble")) || Boolean.TRUE.equals(style.get("underdotted"))
                     || Boolean.TRUE.equals(style.get("underdashed"));
             strikethrough = Boolean.TRUE.equals(style.get("strikethrough"));
         }
     }
 
     public static final class Frame {
-        public final int columns, rows, foreground, background, special, cursorRow, cursorColumn, cursorPercentage;
+        public final int columns, rows, foreground, background, special, cursorRow, cursorColumn, cursorPercentage, cursorAttribute;
         public final String cursorShape;
         public final boolean busy;
         private final String[][] text;
         private final int[][] attributes;
-        private final Map<Integer, Highlight> highlights;
+        private final Highlight[] highlights;
         private static final Highlight DEFAULT = new Highlight(Map.of());
-        Frame(int columns, int rows, String[][] text, int[][] attributes, Map<Integer, Highlight> highlights,
+        Frame(int columns, int rows, String[][] text, int[][] attributes, Highlight[] highlights,
                 int foreground, int background, int special, int cursorRow, int cursorColumn,
-                String cursorShape, int cursorPercentage, boolean busy) {
+                String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy) {
             this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes;
             this.highlights = highlights; this.foreground = foreground; this.background = background;
             this.special = special; this.cursorRow = cursorRow; this.cursorColumn = cursorColumn;
-            this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage; this.busy = busy;
+            this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage;
+            this.cursorAttribute = cursorAttribute; this.busy = busy;
         }
         public String text(int row, int column) { return text[row][column]; }
         public int attribute(int row, int column) { return attributes[row][column]; }
-        public Highlight highlight(int row, int column) { return highlights.getOrDefault(attribute(row, column), DEFAULT); }
+        public Highlight highlight(int row, int column) { return highlight(attributes[row][column]); }
+        public Highlight highlight(int id) {
+            Highlight highlight = id >= 0 && id < highlights.length ? highlights[id] : null;
+            return highlight == null ? DEFAULT : highlight;
+        }
         public int foreground(Highlight highlight) {
             return highlight.reverse ? color(highlight.background, background) : color(highlight.foreground, foreground);
         }
@@ -234,5 +252,14 @@ public final class NeovimGrid {
             return highlight.reverse ? color(highlight.foreground, foreground) : color(highlight.background, background);
         }
         public int special(Highlight highlight) { return color(highlight.special, special); }
+        /** The mode's cursor highlight (mode_info attr_id) or, when undefined, inverted default colors. */
+        public int cursorBackground() {
+            Highlight cursor = highlight(cursorAttribute);
+            return color(cursor.reverse ? cursor.foreground : cursor.background, foreground);
+        }
+        public int cursorForeground() {
+            Highlight cursor = highlight(cursorAttribute);
+            return color(cursor.reverse ? cursor.background : cursor.foreground, background);
+        }
     }
 }

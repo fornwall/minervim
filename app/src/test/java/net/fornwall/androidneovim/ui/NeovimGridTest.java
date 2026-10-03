@@ -93,6 +93,39 @@ public class NeovimGridTest {
         assertEquals(20, grid.frame().cursorPercentage);
     }
 
+    @Test public void cursorUsesModeHighlightOrInvertedDefaults() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("default_colors_set", 0x111111, 0x222222, -1, 0, 0),
+                event("hl_attr_define", 7, Map.of("foreground", 0x333333, "background", 0x444444), Map.of(), List.of()),
+                event("mode_info_set", true, List.of(Map.of("cursor_shape", "block"), Map.of("cursor_shape", "block", "attr_id", 7))),
+                event("mode_change", "normal", 0), flush()));
+        assertEquals(0, grid.frame().cursorAttribute);
+        assertEquals(0xff111111, grid.frame().cursorBackground());
+        assertEquals(0xff222222, grid.frame().cursorForeground());
+        grid.handleRedraw(List.of(event("mode_change", "visual", 1), flush()));
+        assertEquals(0xff444444, grid.frame().cursorBackground());
+        assertEquals(0xff333333, grid.frame().cursorForeground());
+        grid.handleRedraw(List.of(event("mode_info_set", true, List.of(Map.of(), Map.of("cursor_shape", "vertical"))), flush()));
+        assertEquals("vertical", grid.frame().cursorShape);
+        assertEquals(0xff111111, grid.frame().cursorBackground());
+    }
+
+    @Test public void publishedHighlightsAreCopiedOnWrite() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("hl_attr_define", 1, Map.of("undercurl", true), Map.of(), List.of()),
+                line(0, 0, cell("x", 1)), flush()));
+        NeovimGrid.Frame first = grid.frame();
+        assertTrue(first.highlight(0, 0).undercurl);
+        assertFalse(first.highlight(0, 0).underline);
+        grid.handleRedraw(List.of(event("hl_attr_define", 1, Map.of("underdouble", true), Map.of(), List.of()),
+                event("hl_attr_define", 5000, Map.of("bold", true), Map.of(), List.of()), flush()));
+        assertTrue(first.highlight(0, 0).undercurl);
+        assertFalse(first.highlight(5000).bold);
+        assertTrue(grid.frame().highlight(0, 0).underline);
+        assertTrue(grid.frame().highlight(5000).bold);
+        assertFalse(grid.frame().highlight(-1).bold);
+    }
+
     @Test public void reversedOrOutsideScrollRegionsAreIgnored() {
         NeovimGrid grid = new NeovimGrid();
         grid.handleRedraw(List.of(line(0, 0, cell("x", 1)),

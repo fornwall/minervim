@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Neovim</string>
+    <string name="starting_editor">Starting Neovim…</string>
+</resources>

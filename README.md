@@ -40,8 +40,14 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   `clipboard=unnamedplus` work without a clipboard tool. **Copy** copies the
   visual selection, or the current line outside visual mode. Neovim writes at most
   512 KiB to the clipboard.
-- Keyboard, local IME composition, touch/mouse input, wheel scrolling, and
-  clipboard paste are supported. **Paste** is capped at 64 Ki characters.
+- Touch: tap moves the cursor and shows the keyboard, drag or fling scrolls,
+  long-press then drag selects (Visual mode), and pinch changes the font size
+  (8–32 sp, remembered). Scroll steps assume the default `mousescroll`. A mouse
+  keeps ordinary button, drag and wheel semantics.
+- The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
+  from the row, the soft keyboard, or a hardware keyboard.
+- Keyboard, local IME composition, and clipboard paste are supported. **Paste**
+  is capped at 64 Ki characters.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to disable the writes. On the next start the
@@ -64,15 +70,18 @@ if Android ends the process; swap files are disabled.
 Ordinary subprocess launch paths are disabled, including shell commands, jobs,
 and terminal jobs. External language servers and process-based plugin providers
 are consequently unavailable, as are runtime features that run tools, such as
-`:make`, `:grep`, `:!`, spell-file downloads and compressed-file plugins. These restrictions are
-integration boundaries, not a sandbox for untrusted Lua/FFI code.
+`:make`, `:grep`, `:!`, spell-file downloads and compressed-file plugins.
+These restrictions are integration boundaries, not a sandbox for untrusted
+Lua/FFI code.
 
-The view currently uses Android's monospace font and draws individual cells.
-Cross-cell ligatures, cached row rendering, rich accessibility navigation, and
-full IME surrounding-text behavior are future work. Underline variants render
-as a simple underline. Native Tree-sitter parser modules are not bundled;
-the help/Lua/query filetype plugins fall back to their traditional Vimscript
-behavior when no parser is available.
+The view uses Android's monospace font. It draws backgrounds in runs and printable
+ASCII in runs per highlight, scaled to the cell grid; wide and other non-ASCII
+glyphs are drawn per cell. Cross-cell ligatures, cached row rendering, rich
+accessibility navigation, and full IME surrounding-text behavior are future work.
+Undercurl renders as a wave; other underline variants render as a simple
+underline. Native Tree-sitter parser modules are not bundled; the help/Lua/query
+filetype plugins fall back to their traditional Vimscript behavior when no parser
+is available.
 
 ## Architecture
 
@@ -102,7 +111,8 @@ Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, clipboard
 round-trips, background saves, and editor shutdown. UI tests
-also cover hardware key notation, IME lifecycle, and accessibility.
+also cover hardware key notation, sticky modifiers, IME lifecycle, touch gestures,
+and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

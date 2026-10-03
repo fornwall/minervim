@@ -235,10 +235,15 @@ public class NeovimViewTest {
                 view.toggleAlt();
                 assertTrue(connection.commitText("<", 1));
                 view.toggleCtrl();
+                // A composed letter becomes the modified key immediately, and the stale connection closes.
+                assertTrue(connection.setComposingText("d", 1));
+                assertFalse(connection.commitText("d", 1));
+                connection = view.onCreateInputConnection(new EditorInfo());
+                view.toggleCtrl();
                 ((ViewGroup) view.getParent()).removeView(view);
-                assertEquals(List.of("<C-w>", "w", "hi", "<A-LT>"), input.keys);
+                assertEquals(List.of("<C-w>", "w", "hi", "<A-LT>", "<C-d>"), input.keys);
                 assertEquals(List.of("true,false", "false,false", "true,false", "false,false", "false,true", "false,false",
-                        "true,false", "false,false"), changes);
+                        "true,false", "false,false", "true,false", "false,false"), changes);
             });
         } finally {
             instrumentation.runOnMainSync(activity::finish);

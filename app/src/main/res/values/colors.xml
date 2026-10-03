@@ -1,4 +1,5 @@
 <resources>
     <color name="chrome">#F6F8FA</color>
     <color name="status">#57606A</color>
+    <color name="accent">#2E7D32</color>
 </resources>

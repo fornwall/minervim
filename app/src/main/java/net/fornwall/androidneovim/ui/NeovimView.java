@@ -422,6 +422,13 @@ public final class NeovimView extends View {
             }
             @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
+                // Soft keyboards often compose single letters; a sticky modifier makes one a key now.
+                if ((stickyCtrl || stickyAlt) && composition.isEmpty() && text != null && text.length() > 0
+                        && Character.codePointCount(text, 0, text.length()) == 1) {
+                    input(literal(text.toString()));
+                    resetIme();
+                    return true;
+                }
                 composition = text == null ? "" : text.subSequence(0, Math.min(4096, text.length())).toString();
                 invalidate();
                 return true;
@@ -464,7 +471,10 @@ public final class NeovimView extends View {
     static String literal(String text) { return text.replace("<", "<LT>"); }
 
     private void cancelComposition() {
-        if (composition.isEmpty()) return;
+        if (!composition.isEmpty()) resetIme();
+    }
+
+    private void resetIme() {
         composition = "";
         connectionGeneration++;
         InputMethodManager manager = getContext().getSystemService(InputMethodManager.class);

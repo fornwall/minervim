@@ -2,6 +2,8 @@ package net.fornwall.androidneovim;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -68,6 +70,19 @@ public final class MainActivity extends Activity {
         root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout extraKeys = row();
         key(extraKeys, "Esc", "Escape", "<Esc>");
+        // Sticky modifiers apply to the next key from this row, the soft keyboard, or hardware.
+        Button ctrl = action(extraKeys, "Ctrl", "Control modifier for the next key", () -> editor.toggleCtrl());
+        Button alt = action(extraKeys, "Alt", "Alt modifier for the next key", () -> editor.toggleAlt());
+        ColorStateList keyColors = ctrl.getTextColors();
+        editor.setModifierListener((ctrlOn, altOn) -> {
+            for (Button button : List.of(ctrl, alt)) {
+                boolean on = button == ctrl ? ctrlOn : altOn;
+                button.setSelected(on);
+                if (on) button.setTextColor(getColor(R.color.accent));
+                else button.setTextColor(keyColors);
+                button.setTypeface(null, on ? Typeface.BOLD : Typeface.NORMAL);
+            }
+        });
         key(extraKeys, "Tab", "Tab", "<Tab>");
         key(extraKeys, ":", "Command line", ":");
         key(extraKeys, "/", "Search", "/");
@@ -218,7 +233,8 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
-        session.background();
+        // Recreation keeps the process and editor; only leaving the app risks losing edits.
+        if (!isChangingConfigurations()) session.background();
         super.onStop();
     }
 

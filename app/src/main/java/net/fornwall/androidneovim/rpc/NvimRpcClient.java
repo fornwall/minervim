@@ -23,6 +23,8 @@ public final class NvimRpcClient implements Closeable {
         /** For redraw, arguments is the list of event groups, ready for a grid decoder. */
         void onNotification(String method, List<?> arguments);
         void onClosed(Throwable cause);
+        /** Answer a request from Neovim on the callback executor. Null means the method is unsupported. */
+        default CompletableFuture<?> onRequest(String method, List<?> arguments) { return null; }
     }
 
     public static final class RpcException extends IOException {
@@ -141,12 +143,8 @@ public final class NvimRpcClient implements Closeable {
                         && frame.get(1) instanceof String method && frame.get(2) instanceof List<?> args) {
                     dispatch(method, args);
                 } else if (kind == 0 && frame.size() == 4
-                        && frame.get(2) instanceof String && frame.get(3) instanceof List<?>) {
-                    // A UI has no custom rpcrequest handlers. Reply so Neovim cannot deadlock.
-                    long id = number(frame.get(1));
-                    List<?> response = Arrays.asList(1L, id,
-                            List.of(0L, "Android UI does not implement this RPC method"), null);
-                    if (!outgoing.offer(response)) throw new IOException("RPC outgoing queue is full");
+                        && frame.get(2) instanceof String method && frame.get(3) instanceof List<?> args) {
+                    answer(number(frame.get(1)), method, args);
                 } else throw new IOException("Invalid RPC message shape");
             }
         } catch (Exception error) {
@@ -181,6 +179,36 @@ public final class NvimRpcClient implements Closeable {
             callbackSlots.release();
             throw error;
         }
+    }
+
+    /** Neovim blocks until this reply arrives, so every request must be answered exactly once. */
+    private void answer(long id, String method, List<?> args) throws InterruptedException {
+        callbackSlots.acquire();
+        try {
+            callbackExecutor.execute(() -> {
+                try {
+                    CompletableFuture<?> result = closed.get() ? null : listener.onRequest(method, args);
+                    if (result == null) reply(id, "Android UI does not implement this RPC method", null);
+                    else result.whenComplete((value, error) -> {
+                        if (error == null) reply(id, null, value);
+                        else reply(id, String.valueOf(error.getMessage()), null);
+                    });
+                } catch (Exception error) {
+                    reply(id, String.valueOf(error.getMessage()), null);
+                } finally {
+                    callbackSlots.release();
+                }
+            });
+        } catch (RuntimeException error) {
+            callbackSlots.release();
+            reply(id, "Android UI is unavailable", null);
+        }
+    }
+
+    private void reply(long id, String error, Object result) {
+        if (closed.get()) return;
+        if (!outgoing.offer(Arrays.asList(1L, id, error == null ? null : List.of(0L, error), result)))
+            fail(new IOException("RPC outgoing queue is full"));
     }
 
     private static long estimatedBytes(Object value) {

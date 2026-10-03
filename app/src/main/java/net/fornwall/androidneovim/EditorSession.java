@@ -1,6 +1,9 @@
 package net.fornwall.androidneovim;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Handler;
@@ -9,7 +12,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -22,11 +28,17 @@ import net.fornwall.androidneovim.ui.NeovimView;
 final class EditorSession implements NeovimView.Listener {
     interface Observer {
         void onStatus(String message, boolean ready);
+        /** A transient notice, such as the result of updating an original document. */
+        default void onMessage(String message) {}
     }
+
+    static final String READY = "Neovim · local session";
+    private static final int MAX_CLIPBOARD_CHARS = 1024 * 1024;
 
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
     final ExecutorService files = Executors.newSingleThreadExecutor(r -> new Thread(r, "editor-files"));
+    final Documents documents;
     private NvimRpcClient rpc;
     private EditorCommands commands;
     private NeovimView view;
@@ -34,10 +46,17 @@ final class EditorSession implements NeovimView.Listener {
     private boolean started;
     private boolean attached;
     private boolean initialized;
+    private final CompletableFuture<Void> ready = new CompletableFuture<>();
     private String status = "Starting Neovim…";
+    private boolean statusReady;
+    private boolean stopped;
+    /** The last text Neovim copied, so pasting it back keeps a linewise or blockwise register type. */
+    private String copiedText;
+    private String copiedType;
 
     EditorSession(Context context) {
         this.context = context.getApplicationContext();
+        documents = new Documents(this.context, files);
     }
 
     void attach(NeovimView next, Observer nextObserver) {
@@ -45,7 +64,7 @@ final class EditorSession implements NeovimView.Listener {
         view = next;
         observer = nextObserver;
         next.setListener(this);
-        nextObserver.onStatus(status, false);
+        nextObserver.onStatus(status, statusReady);
         if (rpc != null) attachUi();
         if (!started) {
             started = true;
@@ -77,12 +96,20 @@ final class EditorSession implements NeovimView.Listener {
             File notes = new File(home, "notes.txt");
             if (!notes.exists()) {
                 Files.writeString(notes.toPath(), "Welcome to Neovim on Android.\n\n"
-                        + "Press i to insert text; Esc returns to normal mode.\n"
-                        + "Save writes this file to the app's private storage.\n"
-                        + "Open imports a document; Export saves a copy through Android.\n"
-                        + "Your notes survive closing and reopening the app.\n\n"
-                        + "The editor and Android UI run in one process.\n"
-                        + "This initial build has no shell, language servers, or plugin installer.\n");
+                        + "Press i to insert text; Esc returns to normal mode. Tap to move the cursor, "
+                        + "drag to scroll, long-press and drag to select, and pinch to change the font size.\n\n"
+                        + "Save writes this file to the app's private storage. Edits are also saved when "
+                        + "the app goes to the background.\n\n"
+                        + "Open edits a document from another app; saving updates the original when Android "
+                        + "grants write access. Export saves a copy elsewhere.\n\n"
+                        + "Copy and \"+y use Android's clipboard; Paste and \"+p read it.\n\n"
+                        + "Run :Tutor to learn Neovim. :e $MYVIMRC edits your configuration.\n\n"
+                        + "The editor and Android UI run in one process: there is no shell, job control, "
+                        + "language server, or plugin installer.\n");
+            }
+            String init;
+            try (InputStream in = context.getAssets().open("android/init.lua")) {
+                init = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
             String path = new File(home, "nvim.sock").getAbsolutePath();
             NativeBridge.start(home.getAbsolutePath(), path);
@@ -107,7 +134,19 @@ final class EditorSession implements NeovimView.Listener {
                     new NvimRpcClient.Listener() {
                         @Override
                         public void onNotification(String method, List<?> args) {
-                            if (method.equals("redraw") && view != null) view.handleRedraw(args);
+                            switch (method) {
+                                case "redraw" -> { if (view != null) view.handleRedraw(args); }
+                                case "android_clipboard_set" -> copy(args);
+                                case "android_document_written" -> {
+                                    if (!args.isEmpty() && args.get(0) instanceof String written) documentWritten(new File(written));
+                                }
+                                default -> { }
+                            }
+                        }
+
+                        @Override
+                        public CompletableFuture<?> onRequest(String method, List<?> args) {
+                            return method.equals("android_clipboard_get") ? CompletableFuture.completedFuture(clipboard()) : null;
                         }
 
                         @Override
@@ -116,7 +155,8 @@ final class EditorSession implements NeovimView.Listener {
                             rpc = null;
                             if (commands != null) commands.close(cause);
                             try { transport.close(); } catch (IOException ignored) { }
-                            setStatus("Editor stopped. Force stop and reopen the app to start a new session.", false);
+                            stopped = true;
+                            setStatus("Editor stopped. Restart the app to start a new session.", false);
                         }
                     });
             main.post(() -> {
@@ -124,23 +164,26 @@ final class EditorSession implements NeovimView.Listener {
                 client.start();
                 commands = new EditorCommands(client::request, main::post,
                         retry -> main.postDelayed(retry, 10));
-                client.request("nvim_exec_lua", "vim.opt.termguicolors=true; vim.opt.mouse='a'; "
-                        + "vim.opt.number=true; vim.opt.swapfile=false; vim.opt.shortmess:append('I'); "
-                        + "if vim.fn.filereadable(vim.env.VIMRUNTIME..'/doc/tags')==0 then "
-                        + "vim.cmd.helptags(vim.fn.fnameescape(vim.env.VIMRUNTIME..'/doc')) end; "
-                        + "vim.cmd('filetype plugin indent on'); vim.cmd('syntax enable'); "
-                        + "vim.cmd.edit(vim.fn.fnameescape(...))", List.of(notes.getAbsolutePath()))
+                client.request("nvim_get_api_info")
+                        .thenCompose(info -> client.request("nvim_exec_lua", init, List.of(((List<?>) info).get(0),
+                                home.getAbsolutePath(), notes.getAbsolutePath(), documents.directory.getAbsolutePath())))
                         .whenComplete((ignored, error) -> main.post(() -> {
-                            if (error != null) setStatus("Editor setup failed: " + error.getMessage(), false);
-                            else {
+                            if (error != null) {
+                                setStatus("Editor setup failed: " + error.getMessage(), false);
+                                ready.completeExceptionally(error);
+                            } else {
                                 initialized = true;
                                 attachUi();
+                                ready.complete(null);
                             }
                         }));
             });
         } catch (Throwable error) {
             if (connected != null) try { connected.close(); } catch (IOException ignored) { }
-            main.post(() -> setStatus("Cannot start Neovim: " + error.getMessage(), false));
+            main.post(() -> {
+                setStatus("Cannot start Neovim: " + error.getMessage(), false);
+                ready.completeExceptionally(error);
+            });
         }
     }
 
@@ -161,6 +204,8 @@ final class EditorSession implements NeovimView.Listener {
         if (view == null || rpc == null || attached || !initialized) return;
         NeovimView target = view;
         attached = true;
+        int night = target.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        request("nvim_exec_lua", "AndroidNeovim.theme(...)", List.of(night != Configuration.UI_MODE_NIGHT_NO));
         request("nvim_ui_attach", Math.max(1, target.columns()), Math.max(1, target.rows()),
                 Map.of("rgb", true, "ext_linegrid", true, "ext_multigrid", false))
                 .whenComplete((ignored, error) -> main.post(() -> {
@@ -169,7 +214,7 @@ final class EditorSession implements NeovimView.Listener {
                         attached = false;
                         setStatus("Editor setup failed: " + error.getMessage(), false);
                     }
-                    else setStatus("Neovim · local session", true);
+                    else setStatus(READY, true);
                 }));
     }
 
@@ -178,12 +223,69 @@ final class EditorSession implements NeovimView.Listener {
         return commands.request(method, args);
     }
 
+    boolean stopped() { return stopped; }
+
+    /** Opens a file once the editor has started; callbacks run on the main thread. */
+    CompletableFuture<Object> edit(File file) {
+        return ready.thenComposeAsync(ignored -> request("nvim_exec_lua", "vim.cmd.edit(vim.fn.fnameescape(...))",
+                List.of(file.getAbsolutePath())), main::post);
+    }
+
+    /** Android may end a stopped app without notice; save what Neovim can save first. */
+    void background() {
+        if (initialized && rpc != null) request("nvim_exec_lua", "AndroidNeovim.background()", List.of());
+    }
+
+    private void copy(List<?> args) {
+        if (args.size() < 2 || !(args.get(0) instanceof List<?> lines) || !(args.get(1) instanceof String type)) return;
+        StringBuilder text = new StringBuilder();
+        for (Object line : lines) {
+            if (text.length() > 0) text.append('\n');
+            text.append(line instanceof byte[] bytes ? new String(bytes, StandardCharsets.UTF_8) : String.valueOf(line));
+        }
+        ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+        if (clipboard == null) return;
+        copiedText = text.toString();
+        copiedType = type;
+        clipboard.setPrimaryClip(ClipData.newPlainText("Neovim", copiedText));
+    }
+
+    /**
+     * The clipboard as Neovim's [lines, regtype]. Linewise and blockwise lines end with an empty
+     * line; an empty regtype lets Neovim infer it. Android reports empty when the app is unfocused.
+     */
+    private List<Object> clipboard() {
+        ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+        ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
+        CharSequence value = clip == null || clip.getItemCount() == 0 ? null : clip.getItemAt(0).coerceToText(context);
+        String text = value == null ? "" : value.toString();
+        if (text.length() > MAX_CLIPBOARD_CHARS) throw new IllegalStateException("Clipboard exceeds 1 Mi characters");
+        String type = text.equals(copiedText) ? copiedType : "";
+        return List.of(new ArrayList<>(Arrays.asList(text.split("\n", -1))), type);
+    }
+
+    private void documentWritten(File local) {
+        documents.written(local).whenComplete((uri, error) -> main.post(() -> {
+            if (error != null) message("Saved locally; updating the original failed: " + rootMessage(error));
+            else if (uri != null) message("Saved " + local.getName());
+        }));
+    }
+
+    void message(String text) {
+        if (observer != null) observer.onMessage(text);
+    }
+
+    static String rootMessage(Throwable error) {
+        while (error.getCause() != null) error = error.getCause();
+        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+    }
+
     @Override
     public void input(String keys) {
         if (rpc == null || !attached || keys.isEmpty()) return;
         commands.input(keys).exceptionally(error -> {
             main.post(() -> {
-                if (rpc != null) setStatus("Input failed: " + error.getMessage(), true);
+                if (rpc != null) message("Input failed: " + rootMessage(error));
             });
             return null;
         });
@@ -192,7 +294,7 @@ final class EditorSession implements NeovimView.Listener {
     @Override
     public void paste(String text) {
         request("nvim_paste", text, false, -1).exceptionally(error -> {
-            main.post(() -> setStatus("Paste failed: " + error.getMessage(), true));
+            main.post(() -> message("Paste failed: " + rootMessage(error)));
             return null;
         });
     }
@@ -209,6 +311,7 @@ final class EditorSession implements NeovimView.Listener {
 
     private void setStatus(String message, boolean ready) {
         status = message;
+        statusReady = ready;
         if (observer != null) observer.onStatus(message, ready);
     }
 }

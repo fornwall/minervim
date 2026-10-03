@@ -25,6 +25,7 @@ public class NvimRpcClientTest {
         final PipedOutputStream outbound = new PipedOutputStream(serverInput);
         final BlockingQueue<List<?>> notifications = new LinkedBlockingQueue<>();
         final CompletableFuture<Throwable> closed = new CompletableFuture<>();
+        final CompletableFuture<Object> later = new CompletableFuture<>();
         final NvimRpcClient client;
 
         Peer() throws IOException { this(Runnable::run, false); }
@@ -36,6 +37,14 @@ public class NvimRpcClientTest {
                     notifications.add(List.of(method, arguments));
                 }
                 @Override public void onClosed(Throwable cause) { closed.complete(cause); }
+                @Override public CompletableFuture<?> onRequest(String method, List<?> arguments) {
+                    return switch (method) {
+                        case "echo" -> CompletableFuture.completedFuture(arguments);
+                        case "later" -> later;
+                        case "broken" -> throw new IllegalStateException("broken handler");
+                        default -> null;
+                    };
+                }
             });
             client.start();
         }
@@ -85,6 +94,21 @@ public class NvimRpcClientTest {
             assertEquals(99L, reply.get(1));
             assertNotNull(reply.get(2));
             assertNull(reply.get(3));
+        }
+    }
+
+    @Test(timeout = 5000) public void answersEveryNeovimRequestExactlyOnce() throws Exception {
+        try (Peer peer = new Peer()) {
+            peer.send(List.of(0L, 1L, "later", List.of()));
+            peer.send(List.of(0L, 2L, "echo", List.of("a", 1L)));
+            assertEquals(Arrays.asList(1L, 2L, null, List.of("a", 1L)), peer.read());
+            peer.later.complete("done");
+            assertEquals(Arrays.asList(1L, 1L, null, "done"), peer.read());
+            peer.send(List.of(0L, 3L, "broken", List.of()));
+            List<?> broken = peer.read();
+            assertEquals(3L, broken.get(1));
+            assertEquals(List.of(0L, "broken handler"), broken.get(2));
+            assertFalse(peer.client.isClosed());
         }
     }
 

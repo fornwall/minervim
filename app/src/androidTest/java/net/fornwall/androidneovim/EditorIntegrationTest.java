@@ -2,6 +2,8 @@ package net.fornwall.androidneovim;
 
 import static org.junit.Assert.*;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.os.Process;
 import android.view.inputmethod.EditorInfo;
 import androidx.test.core.app.ActivityScenario;
@@ -91,6 +93,35 @@ public final class EditorIntegrationTest {
                     "local p,e=vim.uv.spawn('/system/bin/sh',{args={'-c','true'}},function() end); "
                             + "return {p==nil,e}", List.of());
             assertEquals(Boolean.TRUE, spawn.get(0));
+
+            // Normal startup loads bundled runtime plugins; relative paths resolve inside app storage.
+            assertEquals(2L, request(session, "nvim_eval", "exists(':Tutor')"));
+            assertEquals(context.getFilesDir().getCanonicalPath(), request(session, "nvim_call_function", "getcwd", List.of()));
+
+            // The + register is Android's clipboard in both directions, without a clipboard tool process.
+            ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+            request(session, "nvim_exec_lua", "vim.fn.setreg('+', {'yanked', 'lines'}, 'V')", List.of());
+            await(() -> {
+                AtomicReference<String> clip = new AtomicReference<>();
+                InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                    ClipData data = clipboard.getPrimaryClip();
+                    clip.set(data == null ? null : String.valueOf(data.getItemAt(0).getText()));
+                });
+                return "yanked\nlines\n".equals(clip.get());
+            });
+            assertEquals(List.of(List.of("yanked", "lines"), "V"), request(session, "nvim_exec_lua",
+                    "return {vim.fn.getreg('+', 1, true), vim.fn.getregtype('+')}", List.of()));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                    clipboard.setPrimaryClip(ClipData.newPlainText("test", "from android")));
+            assertEquals(List.of(List.of("from android"), "v"), request(session, "nvim_exec_lua",
+                    "return {vim.fn.getreg('+', 1, true), vim.fn.getregtype('+')}", List.of()));
+
+            // Moving to the background saves modified file buffers.
+            File autosaved = new File(context.getFilesDir(), "autosaved.txt");
+            request(session, "nvim_exec_lua", "vim.cmd('enew!'); vim.api.nvim_buf_set_name(0, ...); "
+                    + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {'kept'})", List.of(autosaved.getAbsolutePath()));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(session::background);
+            await(() -> autosaved.isFile() && Files.readString(autosaved.toPath()).equals("kept\n"));
 
             // Native :qa must tear down its thread and socket, never exit Android's process.
             try { request(session, "nvim_command", "qa!"); } catch (Exception expectedDisconnect) { }

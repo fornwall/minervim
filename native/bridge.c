@@ -29,7 +29,7 @@ static void fail(const char *message) {
 // One instance is supported for the process lifetime; upstream uses global state.
 __attribute__((noreturn)) void __wrap_exit(int status) {
   char message[128];
-  snprintf(message, sizeof message, "Neovim exited (%d). Force stop and reopen the app to start a new editor.", status);
+  snprintf(message, sizeof message, "Neovim exited (%d). Restart the app to start a new editor.", status);
   fail(message);
   pthread_exit(NULL);
 }
@@ -56,13 +56,12 @@ static void *run_editor(void *opaque) {
   setenv("XDG_STATE_HOME", args->files, 1);
   setenv("XDG_CACHE_HOME", tmp, 1);
   setenv("SHELL", "/system/bin/sh", 1);
-  // No process cwd change: the Android client opens files using absolute paths.
   unlink(args->socket);
+  // Normal startup: the user's $XDG_CONFIG_HOME/nvim config, bundled runtime plugins and ShaDa.
   char *argv[] = { "nvim", "--headless", "--listen", args->socket,
-                   "-u", "NONE", "-i", "NONE", "--noplugin",
                    "--cmd", "set noswapfile shell=/system/bin/sh", NULL };
-  nvim_main(11, argv);
-  fail("Neovim stopped. Force stop and reopen the app to start a new editor.");
+  nvim_main(6, argv);
+  fail("Neovim stopped. Restart the app to start a new editor.");
   free(runtime); free(tmp); free(config);
   free(args->files); free(args->socket); free(args);
   return NULL;

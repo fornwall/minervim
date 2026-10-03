@@ -2,36 +2,31 @@ package net.fornwall.androidneovim;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import net.fornwall.androidneovim.ui.NeovimView;
 
 public final class MainActivity extends Activity {
     private static final int OPEN = 1;
     private static final int EXPORT = 2;
-    private static final int MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
     private final List<Button> actions = new ArrayList<>();
     private EditorSession session;
     private NeovimView editor;
+    private LinearLayout statusRow;
     private TextView status;
+    private Button restart;
 
     @Override
     public void onCreate(Bundle state) {
@@ -39,28 +34,34 @@ public final class MainActivity extends Activity {
         session = ((EditorApplication) getApplication()).session();
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(22, 27, 34));
+        root.setBackgroundColor(getColor(R.color.chrome));
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             var padding = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
             view.setPadding(padding.left, padding.top, padding.right, padding.bottom);
             return WindowInsets.CONSUMED;
         });
+        statusRow = row();
         status = new TextView(this);
-        status.setTextColor(0xffa9b1bd);
+        status.setTextColor(getColor(R.color.status));
         status.setTextSize(12);
-        status.setPadding(dp(12), dp(6), dp(12), dp(4));
+        status.setPadding(dp(12), 0, dp(12), 0);
         status.setText(R.string.starting_editor);
-        root.addView(status, new LinearLayout.LayoutParams(-1, -2));
+        statusRow.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        restart = new Button(this);
+        restart.setText(R.string.restart);
+        restart.setAllCaps(false);
+        restart.setVisibility(View.GONE);
+        restart.setOnClickListener(ignored -> restart());
+        statusRow.addView(restart, new LinearLayout.LayoutParams(-2, -1));
+        root.addView(statusRow);
 
         LinearLayout toolbar = row();
-        action(toolbar, "Open", "Import a text document", this::open);
-        action(toolbar, "Save", "Save the current local file", this::save);
+        action(toolbar, "Open", "Open a document from another app", this::open);
+        action(toolbar, "Save", "Save the current file", this::save);
         action(toolbar, "Export", "Export a copy of the current file", this::export);
-        action(toolbar, "Paste", "Paste clipboard into Neovim", this::paste);
-        action(toolbar, "Keys", "Show the software keyboard", () -> {
-            editor.requestFocus();
-            getSystemService(InputMethodManager.class).showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT);
-        });
+        action(toolbar, "Copy", "Copy the selection or current line to the clipboard", this::copy);
+        action(toolbar, "Paste", "Paste clipboard into Neovim", () -> editor.pasteClipboard());
+        action(toolbar, "Keys", "Show the software keyboard", () -> editor.showKeyboard());
         root.addView(toolbar);
         editor = new NeovimView(this);
         editor.setId(View.generateViewId());
@@ -69,6 +70,7 @@ public final class MainActivity extends Activity {
         key(extraKeys, "Esc", "Escape", "<Esc>");
         key(extraKeys, "Tab", "Tab", "<Tab>");
         key(extraKeys, ":", "Command line", ":");
+        key(extraKeys, "/", "Search", "/");
         key(extraKeys, "←", "Left", "<Left>");
         key(extraKeys, "↓", "Down", "<Down>");
         key(extraKeys, "↑", "Up", "<Up>");
@@ -76,9 +78,47 @@ public final class MainActivity extends Activity {
         root.addView(extraKeys);
         setContentView(root);
         root.requestApplyInsets();
-        session.attach(editor, (message, ready) -> {
-            status.setText(message);
-            for (Button action : actions) action.setEnabled(ready);
+        session.attach(editor, new EditorSession.Observer() {
+            @Override public void onStatus(String message, boolean ready) {
+                status.setText(message);
+                // Hide the status row while the editor runs normally; Neovim's own UI shows its state.
+                statusRow.setVisibility(ready && message.equals(EditorSession.READY) ? View.GONE : View.VISIBLE);
+                restart.setVisibility(session.stopped() ? View.VISIBLE : View.GONE);
+                for (Button action : actions) action.setEnabled(ready);
+            }
+            @Override public void onMessage(String message) { message(message); }
+        });
+        if (state == null) handle(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handle(intent);
+    }
+
+    /** Opens documents and text shared or sent to the app. */
+    private void handle(Intent intent) {
+        if (intent == null || intent.getAction() == null) return;
+        int grants = intent.getFlags();
+        switch (intent.getAction()) {
+            case Intent.ACTION_VIEW, Intent.ACTION_EDIT -> {
+                if (intent.getData() != null) open(session.documents.importDocument(intent.getData(), grants));
+            }
+            case Intent.ACTION_SEND -> {
+                Uri stream = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class);
+                CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+                if (stream != null) open(session.documents.importDocument(stream, grants));
+                else if (text != null) open(session.documents.importText("shared.txt", text.toString()));
+            }
+            default -> { }
+        }
+    }
+
+    private void open(CompletableFuture<File> imported) {
+        imported.thenCompose(file -> session.edit(file)).whenComplete((ignored, error) -> {
+            if (error != null) message("Open failed: " + EditorSession.rootMessage(error));
         });
     }
 
@@ -89,7 +129,7 @@ public final class MainActivity extends Activity {
         return row;
     }
 
-    private void action(LinearLayout row, String label, String description, Runnable action) {
+    private Button action(LinearLayout row, String label, String description, Runnable action) {
         Button button = new Button(this);
         button.setText(label);
         button.setTextSize(12);
@@ -102,6 +142,7 @@ public final class MainActivity extends Activity {
         button.setOnClickListener(ignored -> action.run());
         row.addView(button, new LinearLayout.LayoutParams(0, -1, 1));
         actions.add(button);
+        return button;
     }
 
     private void key(LinearLayout row, String label, String description, String input) {
@@ -119,20 +160,28 @@ public final class MainActivity extends Activity {
     }
 
     private void save() {
-        session.request("nvim_exec_lua", "vim.cmd.write()", List.of()).whenComplete((ignored, error) ->
-                message(error == null ? "Saved locally" : "Save failed: " + rootMessage(error)));
+        session.request("nvim_exec_lua", "vim.cmd.write()", List.of()).whenComplete((ignored, error) -> {
+            if (error != null) message("Save failed: " + EditorSession.rootMessage(error));
+        });
     }
 
     private void export() {
-        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/plain");
-        intent.putExtra(Intent.EXTRA_TITLE, "notes.txt");
-        startActivityForResult(intent, EXPORT);
+        session.request("nvim_exec_lua", "return vim.fn.expand('%:t')", List.of()).whenComplete((name, error) -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, name instanceof String n && !n.isEmpty() ? n : "notes.txt");
+            startActivityForResult(intent, EXPORT);
+        });
     }
 
-    private void paste() {
-        editor.pasteClipboard();
+    /** Copies the visual selection, or the current line outside visual mode, to Android's clipboard. */
+    private void copy() {
+        session.request("nvim_get_mode").whenComplete((mode, error) -> {
+            String current = mode instanceof Map<?, ?> map ? String.valueOf(map.get("mode")) : "";
+            if (current.startsWith("v") || current.startsWith("V") || current.startsWith("\u0016")) session.input("\"+y");
+            else session.request("nvim_exec_lua", "vim.fn.setreg('+', vim.api.nvim_get_current_line(), 'V')", List.of());
+        });
     }
 
     @Override
@@ -140,64 +189,19 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
-        if (requestCode == OPEN) session.files.execute(() -> importDocument(uri));
+        if (requestCode == OPEN) open(session.documents.importDocument(uri, data.getFlags()));
         if (requestCode == EXPORT) {
             session.request("nvim_exec_lua", "vim.cmd.write(); return vim.api.nvim_buf_get_name(0)", List.of())
-                    .whenComplete((path, error) -> {
-                        if (error != null) message("Export failed: " + rootMessage(error));
-                        else session.files.execute(() -> exportDocument(uri, new File((String) path)));
-                    });
+                    .thenCompose(path -> session.documents.export(new File((String) path), uri))
+                    .whenComplete((ignored, error) -> message(error == null ? "Exported a copy"
+                            : "Export failed: " + EditorSession.rootMessage(error)));
         }
     }
 
-    private void importDocument(Uri uri) {
-        try {
-            String name = "document.txt";
-            try (var cursor = getContentResolver().query(uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) name = cursor.getString(0);
-            }
-            name = name.replaceAll("[^\\p{L}\\p{N}._ -]", "_");
-            if (name.isBlank() || name.equals(".") || name.equals("..")) name = "document.txt";
-            if (name.length() > 120) name = name.substring(name.length() - 120);
-            byte[] content;
-            try (InputStream stream = getContentResolver().openInputStream(uri)) {
-                if (stream == null) throw new IOException("Cannot read document");
-                content = stream.readNBytes(MAX_DOCUMENT_BYTES + 1);
-            }
-            if (content.length > MAX_DOCUMENT_BYTES) throw new IOException("Document exceeds the 4 MiB import limit");
-            File directory = new File(getFilesDir(), "documents/" + UUID.randomUUID());
-            Files.createDirectories(directory.toPath());
-            File destination = new File(directory, name);
-            Files.write(destination.toPath(), content);
-            runOnUiThread(() -> session.request("nvim_exec_lua", "vim.cmd.edit(vim.fn.fnameescape(...))",
-                    List.of(destination.getAbsolutePath())).whenComplete((ignored, error) ->
-                    message(error == null ? "Opened a local copy; use Export to share changes"
-                            : "Open failed: " + rootMessage(error))));
-        } catch (Exception error) {
-            message("Open failed: " + rootMessage(error));
-        }
-    }
-
-    private void exportDocument(Uri uri, File source) {
-        try {
-            byte[] content;
-            try (InputStream in = Files.newInputStream(source.toPath())) {
-                content = in.readNBytes(MAX_DOCUMENT_BYTES + 1);
-            }
-            if (content.length > MAX_DOCUMENT_BYTES) throw new IOException("File exceeds the 4 MiB export limit");
-            try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
-                if (out == null) throw new IOException("Cannot write document");
-                out.write(content);
-            }
-            message("Exported a copy");
-        } catch (Exception error) {
-            message("Export failed: " + rootMessage(error));
-        }
-    }
-
-    private static String rootMessage(Throwable error) {
-        while (error.getCause() != null) error = error.getCause();
-        return error.getMessage();
+    /** Neovim's global state cannot be reinitialized in-process, so start a fresh app process. */
+    private void restart() {
+        startActivity(Intent.makeRestartActivityTask(getComponentName()));
+        Runtime.getRuntime().exit(0);
     }
 
     private void message(String text) {
@@ -211,6 +215,12 @@ public final class MainActivity extends Activity {
     }
 
     NeovimView editorView() { return editor; }
+
+    @Override
+    protected void onStop() {
+        session.background();
+        super.onStop();
+    }
 
     @Override
     protected void onDestroy() {

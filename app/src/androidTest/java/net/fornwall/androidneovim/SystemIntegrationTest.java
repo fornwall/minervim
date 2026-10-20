@@ -205,7 +205,7 @@ public final class SystemIntegrationTest {
     }
 
     @Test
-    public void exportWritesFirstAndKeepsTheFileExtension() throws Exception {
+    public void exportSavesChangesFirstAndKeepsTheFileExtension() throws Exception {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         Uri destination = TestDocumentProvider.uri("export-" + System.nanoTime());
         List<Intent> started = new CopyOnWriteArrayList<>();
@@ -222,12 +222,7 @@ public final class SystemIntegrationTest {
             File file = new File(context.getFilesDir(), "init.lua");
             request("nvim_exec_lua", "vim.cmd.edit(vim.fn.fnameescape(...)); vim.api.nvim_buf_set_lines(0, 0, -1, true, {'return 1'})",
                     List.of(file.getAbsolutePath()));
-            activity.onActivity(a -> {
-                ArrayList<View> buttons = new ArrayList<>();
-                a.getWindow().getDecorView().findViewsWithText(buttons, "Export a copy of the current file",
-                        View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
-                assertTrue(buttons.get(0).performClick());
-            });
+            clickExport(activity);
             await(() -> {
                 try { return readOriginal(destination).equals("return 1\n"); }
                 catch (IOException notYet) { return false; }
@@ -237,9 +232,25 @@ public final class SystemIntegrationTest {
             // A text/plain type would make providers save init.lua.txt.
             String type = MimeTypeMap.getSingleton().getMimeTypeFromExtension("lua");
             assertEquals(type == null ? "application/octet-stream" : type, started.get(0).getType());
+
+            // An unmodified file is exported without writing it.
+            assertTrue(file.setLastModified(946_684_800_000L));
+            writeOriginal(destination, "");
+            clickExport(activity);
+            await(() -> readOriginal(destination).equals("return 1\n"));
+            assertEquals(946_684_800_000L, file.lastModified());
         } finally {
             instrumentation.removeMonitor(monitor);
         }
+    }
+
+    private static void clickExport(ActivityScenario<MainActivity> activity) {
+        activity.onActivity(a -> {
+            ArrayList<View> buttons = new ArrayList<>();
+            a.getWindow().getDecorView().findViewsWithText(buttons, "Export a copy of the current file",
+                    View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+            assertTrue(buttons.get(0).performClick());
+        });
     }
 
     @Test

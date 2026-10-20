@@ -222,9 +222,13 @@ public final class MainActivity extends Activity {
         });
     }
 
-    /** Writes the current file before choosing a destination, so the editor is not needed for the result. */
+    /**
+     * Saves the current file before choosing a destination, so the editor is not needed for the result.
+     * An unmodified file is not written, which would also update its original.
+     */
     private void export() {
-        String write = "vim.cmd.write(); return vim.api.nvim_buf_get_name(0)";
+        String write = "local name = vim.api.nvim_buf_get_name(0); "
+                + "if name ~= '' and vim.uv.fs_stat(name) then vim.cmd.update() else vim.cmd.write() end; return name";
         session.request("nvim_exec_lua", write, List.of()).whenComplete((path, error) -> {
             if (error != null || !(path instanceof String file)) {
                 message("Export failed: " + (error == null ? "no file name" : EditorSession.rootMessage(error)));

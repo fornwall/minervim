@@ -1,6 +1,6 @@
 # Android Neovim
 
-An initial native Android Neovim editor. The Android UI and Neovim 0.11.6 run in
+An initial native Android Neovim editor. The Android UI and Neovim 0.12.6 run in
 one application process: Neovim owns a native thread, and a dedicated Android
 `View` draws its `ext_linegrid` events. There is no terminal emulator between them.
 
@@ -79,9 +79,9 @@ ASCII in runs per highlight, scaled to the cell grid; wide and other non-ASCII
 glyphs are drawn per cell. Cross-cell ligatures, cached row rendering, rich
 accessibility navigation, and full IME surrounding-text behavior are future work.
 Undercurl renders as a wave; other underline variants render as a simple
-underline. Native Tree-sitter parser modules are not bundled; the help/Lua/query
-filetype plugins fall back to their traditional Vimscript behavior when no parser
-is available.
+underline. Native Tree-sitter parser modules are not bundled; the help, Lua,
+Markdown and query filetype plugins fall back to their traditional Vimscript
+behavior when no parser is available.
 
 ## Architecture
 

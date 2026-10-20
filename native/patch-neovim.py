@@ -7,7 +7,7 @@ source = pathlib.Path(sys.argv[1])
 
 # This prototype does not package native parser modules. Keep the traditional
 # Vimscript ftplugins/syntax when an upstream Lua ftplugin requires a parser.
-for filetype in ('help', 'lua', 'query'):
+for filetype in ('help', 'lua', 'markdown', 'query'):
     path = source / f'runtime/ftplugin/{filetype}.lua'
     path.write_text("if not vim.treesitter.get_parser(0, nil, { error = false }) then return end\n"
                     + path.read_text())
@@ -31,11 +31,12 @@ replace('cmake/Deps.cmake', 'if(APPLE)\n', '''if(ANDROID)
 endif()
 if(APPLE)
 ''')
-replace('cmake.deps/cmake/BuildLuajit.cmake', 'if(UNIX)\n  BuildLuaJit', '''if(ANDROID)
+replace('cmake.deps/cmake/BuildLuajit.cmake', '\nif(CYGWIN)\n', '''
+if(ANDROID)
   string(REPLACE "-none" "" android_cc_target "${CMAKE_C_COMPILER_TARGET}")
-  BuildLuaJit(INSTALL_COMMAND ${MAKE_PRG} -j8
+  BuildLuajit(INSTALL_COMMAND ${MAKE_PRG} -j8
     HOST_CC=cc
-    STRIP=${CMAKE_STRIP}
+    TARGET_STRIP=${CMAKE_STRIP}
     CC=${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/${android_cc_target}-clang
     "AR=${CMAKE_AR} rcu"
     TARGET_SYS=Linux
@@ -43,8 +44,8 @@ replace('cmake.deps/cmake/BuildLuajit.cmake', 'if(UNIX)\n  BuildLuaJit', '''if(A
     XCFLAGS=-fPIC
     PREFIX=${DEPS_INSTALL_DIR}
     install)
-elseif(UNIX)
-  BuildLuaJit''')
+elseif(CYGWIN)
+''')
 replace('src/nvim/CMakeLists.txt', 'set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} $<TARGET_FILE:nlua0> ${PROJECT_BINARY_DIR})', '''if(ANDROID)
   set(LUA_GEN ${LUA_GEN_PRG} ${GENERATOR_PRELOAD} ${PROJECT_SOURCE_DIR} ${ANDROID_HOST_NLUA0} ${PROJECT_BINARY_DIR})
   list(APPEND gen_cflags --target=${CMAKE_C_COMPILER_TARGET} --sysroot=${CMAKE_SYSROOT})
@@ -77,8 +78,6 @@ replace('src/nvim/os/signal.c', 'void signal_start(void)\n{', '''void signal_sta
 #ifdef __ANDROID__
   return;
 #endif''')
-
-replace('src/nvim/CMakeLists.txt', 'elseif (NOT CMAKE_SYSTEM_NAME STREQUAL "SunOS")', 'elseif (NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "SunOS")')
 
 # Reject PTYs before Neovim changes process-wide SIGCHLD/stdio state.
 replace('src/nvim/os/pty_proc_unix.c',

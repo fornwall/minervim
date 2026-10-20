@@ -111,10 +111,14 @@ final class EditorCommands {
         for (Operation operation : pending) operation.result.completeExceptionally(cause);
     }
 
+    /** A new size may replace an unsent resize, but not one for the UI before a queued attach or detach. */
     private Operation unsentResize() {
-        if (nextResize != null) return nextResize;
-        for (Operation operation : queue) if (RESIZE.equals(operation.method)) return operation;
-        return null;
+        Operation resize = nextResize;
+        for (Operation operation : queue) {
+            if (RESIZE.equals(operation.method)) resize = operation;
+            else if ("nvim_ui_attach".equals(operation.method) || "nvim_ui_detach".equals(operation.method)) resize = null;
+        }
+        return resize;
     }
 
     private CompletableFuture<Object> enqueue(Operation operation) {

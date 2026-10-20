@@ -128,6 +128,26 @@ public class EditorCommandsTest {
         assertEquals(List.of("nvim_ui_try_resize", "nvim_ui_detach", "nvim_ui_attach"), fake.methods);
     }
 
+    @Test public void aResizeAfterAQueuedAttachIsSentAfterIt() {
+        // Neovim is busy, so a resize of the old view waits behind input when the Activity is recreated.
+        Fake fake = new Fake();
+        fake.commands.input("x");
+        fake.commands.request("nvim_ui_try_resize", 80, 24);
+        fake.commands.request("nvim_ui_detach");
+        fake.commands.request("nvim_ui_attach", 1, 1, Map.of());
+        CompletableFuture<Object> laidOut = fake.commands.request("nvim_ui_try_resize", 40, 60);
+        CompletableFuture<Object> later = fake.commands.request("nvim_ui_try_resize", 41, 60);
+        assertSame(laidOut, later);
+        fake.reply(1L);
+        assertEquals(List.of("nvim_input", "nvim_ui_try_resize", "nvim_ui_detach", "nvim_ui_attach"), fake.methods);
+        assertArrayEquals(new Object[]{80, 24}, fake.arguments.get(1));
+        fake.answer(1, null);
+        assertEquals("nvim_ui_try_resize", fake.methods.get(4));
+        assertArrayEquals(new Object[]{41, 60}, fake.arguments.get(4));
+        fake.answer(4, true);
+        assertEquals(true, later.join());
+    }
+
     @Test public void largePastesStreamWithoutSplittingCrlfOrSurrogatePairs() {
         Fake fake = new Fake();
         CompletableFuture<Object> small = fake.commands.paste("a\r\nb");

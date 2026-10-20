@@ -128,6 +128,34 @@ public class EditorCommandsTest {
         assertEquals(List.of("nvim_ui_try_resize", "nvim_ui_detach", "nvim_ui_attach"), fake.methods);
     }
 
+    @Test public void largePastesStreamWithoutSplittingCrlfOrSurrogatePairs() {
+        Fake fake = new Fake();
+        CompletableFuture<Object> small = fake.commands.paste("a\r\nb");
+        assertArrayEquals(new Object[]{"a\r\nb", true, -1}, fake.arguments.get(0));
+        fake.reply(true);
+        assertEquals(true, small.join());
+
+        int size = EditorCommands.PASTE_CHUNK;
+        String text = "x".repeat(size - 1) + "\r\n" + "y".repeat(size - 3) + "🙂" + "z".repeat(size);
+        CompletableFuture<Object> large = fake.commands.paste(text);
+        List<String> chunks = new ArrayList<>();
+        List<Object> phases = new ArrayList<>();
+        for (Object[] args : fake.arguments.subList(1, fake.arguments.size())) {
+            chunks.add((String) args[0]);
+            assertEquals(true, args[1]);
+            phases.add(args[2]);
+        }
+        assertEquals(List.of(1, 2, 2, 3), phases);
+        assertEquals(text, String.join("", chunks));
+        assertTrue(chunks.get(1).startsWith("\r\n"));
+        assertTrue(chunks.get(2).startsWith("🙂"));
+        for (String chunk : chunks) assertTrue(chunk.length() <= size);
+        for (int i = 0; i < 3; i++) fake.reply(true);
+        assertFalse(large.isDone());
+        fake.reply(true);
+        assertEquals(true, large.join());
+    }
+
     @Test public void partialUtf8IsRetriedAsExactBytesBeforeNextCommand() {
         Fake fake = new Fake();
         byte[] bytes = "é世".getBytes(StandardCharsets.UTF_8);

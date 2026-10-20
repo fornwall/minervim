@@ -29,8 +29,8 @@ vim.cmd('syntax enable')
 local clipboard_limit = 512 * 1024
 local function copy(lines, regtype)
   local text = table.concat(lines, '\n')
-  if #text > clipboard_limit then
-    vim.notify('Selection exceeds the 512 KiB Android clipboard limit', vim.log.levels.WARN)
+  if vim.str_utfindex(text, 'utf-16') > clipboard_limit then
+    vim.notify('Selection exceeds the 512 Ki character Android clipboard limit', vim.log.levels.WARN)
     return
   end
   vim.rpcnotify(channel, 'android_clipboard_set', text, regtype)

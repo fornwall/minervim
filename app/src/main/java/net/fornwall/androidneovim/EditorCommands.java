@@ -26,6 +26,7 @@ final class EditorCommands {
     }
 
     private static final String RESIZE = "nvim_ui_try_resize";
+    static final int PASTE_CHUNK = 64 * 1024;
     /** Requests later input may overtake: fast calls, which Neovim runs on receipt, and resizes. */
     private static final Set<String> UNORDERED = Set.of("nvim_get_mode", "nvim_input_mouse", RESIZE);
     /** Below the RPC client's pending limit, so requests stuck at a prompt leave room for input. */
@@ -74,6 +75,27 @@ final class EditorCommands {
         if (resize == null) return enqueue(new Operation(method, arguments.clone()));
         resize.arguments = arguments.clone();
         return resize.result;
+    }
+
+    /**
+     * Streams text through nvim_paste in chunks, as a terminal does, keeping each CRLF and surrogate
+     * pair within one chunk. Resolves once Neovim has handled every chunk.
+     */
+    CompletableFuture<Object> paste(String text) {
+        List<CompletableFuture<Object>> chunks = new ArrayList<>();
+        int start = 0;
+        do {
+            int end = Math.min(text.length(), start + PASTE_CHUNK);
+            if (end < text.length() && (Character.isHighSurrogate(text.charAt(end - 1))
+                    || text.charAt(end - 1) == '\r' && text.charAt(end) == '\n')) end--;
+            int phase = start == 0 ? (end == text.length() ? -1 : 1) : (end == text.length() ? 3 : 2);
+            CompletableFuture<Object> chunk = request("nvim_paste", text.substring(start, end), true, phase);
+            chunks.add(chunk);
+            if (chunk.isCompletedExceptionally()) break;
+            start = end;
+        } while (start < text.length());
+        return CompletableFuture.allOf(chunks.toArray(new CompletableFuture<?>[0]))
+                .thenApply(ignored -> chunks.get(chunks.size() - 1).join());
     }
 
     void close(Throwable cause) {

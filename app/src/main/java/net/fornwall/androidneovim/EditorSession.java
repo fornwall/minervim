@@ -31,7 +31,8 @@ final class EditorSession implements NeovimView.Listener {
     }
 
     static final String READY = "Neovim · local session";
-    private static final int MAX_CLIPBOARD_CHARS = 1024 * 1024;
+    /** Matches init.lua's copy limit; Android's clipboard transactions are limited to about 1 MB. */
+    private static final int MAX_CLIPBOARD_CHARS = 512 * 1024;
 
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -254,16 +255,17 @@ final class EditorSession implements NeovimView.Listener {
 
     /**
      * The clipboard as [text, regtype], which init.lua splits at newlines. Linewise and blockwise text
-     * ends with a newline; an empty regtype lets Neovim infer it. Android reports empty when the app
-     * is unfocused.
+     * ends with a newline; an empty regtype lets Neovim infer it. Text from other apps gets Unix line
+     * breaks. Android reports empty when the app is unfocused.
      */
     private List<Object> clipboard() {
         ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
         ClipData clip = clipboard == null ? null : clipboard.getPrimaryClip();
         CharSequence value = clip == null || clip.getItemCount() == 0 ? null : clip.getItemAt(0).coerceToText(context);
         String text = value == null ? "" : value.toString();
-        if (text.length() > MAX_CLIPBOARD_CHARS) throw new IllegalStateException("Clipboard exceeds 1 Mi characters");
-        return List.of(text, text.equals(copiedText) ? copiedType : "");
+        if (text.length() > MAX_CLIPBOARD_CHARS) throw new IllegalStateException("Clipboard exceeds 512 Ki characters");
+        if (text.equals(copiedText)) return List.of(text, copiedType);
+        return List.of(text.replace("\r\n", "\n"), "");
     }
 
     private void documentWritten(File local) {
@@ -295,7 +297,9 @@ final class EditorSession implements NeovimView.Listener {
 
     @Override
     public void paste(String text) {
-        request("nvim_paste", text, false, -1).exceptionally(error -> {
+        CompletableFuture<Object> pasted = rpc == null || commands == null
+                ? CompletableFuture.failedFuture(new IOException("Editor is not connected")) : commands.paste(text);
+        pasted.exceptionally(error -> {
             main.post(() -> message("Paste failed: " + rootMessage(error)));
             return null;
         });

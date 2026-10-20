@@ -466,8 +466,8 @@ public final class NeovimView extends View {
         ClipData clip = clipboard.getPrimaryClip();
         if (clip == null || clip.getItemCount() == 0) return;
         CharSequence text = clip.getItemAt(0).coerceToText(getContext());
-        if (text != null && text.length() > 64 * 1024) {
-            Toast.makeText(getContext(), "Paste is limited to 64 KiB of text in this build.", Toast.LENGTH_SHORT).show();
+        if (text != null && text.length() > 512 * 1024) {
+            Toast.makeText(getContext(), "Paste is limited to 512 Ki characters.", Toast.LENGTH_SHORT).show();
             return;
         }
         if (text != null && listener != null) {

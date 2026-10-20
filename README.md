@@ -38,8 +38,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   through Android. Documents are limited to 4 MiB.
 - The `+` and `*` registers use Android's clipboard: `"+y`, `"+p`, and
   `clipboard=unnamedplus` work without a clipboard tool. **Copy** copies the
-  visual selection, or the current line outside visual mode. Neovim writes at most
-  512 KiB to the clipboard.
+  visual selection, or the current line outside visual mode. Clipboard text is
+  limited to 512 Ki characters in each direction.
 - Touch: tap moves the cursor and shows the keyboard, drag or fling scrolls,
   long-press then drag selects (Visual mode), and pinch changes the font size
   (8–32 sp, remembered). Scroll steps assume the default `mousescroll`. A mouse
@@ -48,7 +48,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
   from the row, the soft keyboard, or a hardware keyboard.
 - Keyboard, local IME composition, and clipboard paste are supported. **Paste**
-  is capped at 64 Ki characters.
+  streams large text to Neovim in chunks. Pasted CRLF line breaks, and those read
+  by `"+p`, become single line breaks.
 - The soft keyboard's Enter is `<CR>`, and multi-line text it commits (clipboard
   suggestions, dictation) is pasted rather than typed, so mappings and
   autoindent do not apply to it. Text still being composed is sent before
@@ -135,17 +136,17 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
-lifecycle, including requests from Neovim, and command ordering and resize
-coalescing.
+lifecycle, including requests from Neovim, and command ordering, resize
+coalescing and chunked paste.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
-round-trips (including more lines than one RPC message may hold), requests at a
-"Press ENTER" prompt, background saves, window focus events, IME line breaks and
-modes, and editor shutdown. UI tests also cover hardware key notation, sticky
-modifiers, IME lifecycle and deletions, mouse modifiers, touch and touchpad
-gestures, and accessibility.
+round-trips (including more lines than one RPC message may hold), CRLF paste,
+requests at a "Press ENTER" prompt, background saves, window focus events, IME
+line breaks and modes, and editor shutdown. UI tests also cover hardware key
+notation, sticky modifiers, IME lifecycle and deletions, mouse modifiers, touch
+and touchpad gestures, and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

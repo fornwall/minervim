@@ -242,6 +242,33 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void pasteAndPlusRegisterTreatCrlfAsOneLineBreak() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                    clipboard.setPrimaryClip(ClipData.newPlainText("test", "a\r\nb")));
+            request(session, "nvim_command", "enew!");
+            activity.onActivity(a -> a.editorView().pasteClipboard());
+            await(() -> List.of("a", "b").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
+            assertEquals(List.of("a", "b"), request(session, "nvim_exec_lua", "return vim.fn.getreg('+', 1, true)", List.of()));
+
+            // Larger text streams in several chunks that still paste as one change.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
+                    clipboard.setPrimaryClip(ClipData.newPlainText("test", "line\r\n".repeat(40_000) + "end")));
+            request(session, "nvim_command", "enew!");
+            activity.onActivity(a -> a.editorView().pasteClipboard());
+            await(() -> 40_001L == (Long) request(session, "nvim_buf_line_count", 0));
+            assertEquals(List.of("line", "line", "end"), request(session, "nvim_exec_lua",
+                    "local b = vim.api.nvim_buf_get_lines(0, 0, -1, true); return {b[1], b[20001], b[#b]}", List.of()));
+            request(session, "nvim_command", "silent undo");
+            assertEquals(List.of(""), request(session, "nvim_buf_get_lines", 0, 0, -1, true));
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));

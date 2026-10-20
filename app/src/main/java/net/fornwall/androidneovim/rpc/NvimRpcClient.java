@@ -1,5 +1,6 @@
 package net.fornwall.androidneovim.rpc;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
@@ -40,6 +41,7 @@ public final class NvimRpcClient implements Closeable {
 
     private static final int MAX_PENDING = 256;
     private static final int CALLBACK_KIB = 16 * 1024;
+    private static final int READ_BUFFER = 64 * 1024;
     private final InputStream input;
     private final OutputStream output;
     private final Executor callbackExecutor;
@@ -57,7 +59,8 @@ public final class NvimRpcClient implements Closeable {
 
     public NvimRpcClient(InputStream input, OutputStream output, Executor callbackExecutor,
             Listener listener) {
-        this.input = Objects.requireNonNull(input);
+        // MessagePack decodes byte by byte; a socket read per byte is one system call.
+        this.input = new BufferedInputStream(Objects.requireNonNull(input), READ_BUFFER);
         this.output = Objects.requireNonNull(output);
         this.callbackExecutor = Objects.requireNonNull(callbackExecutor);
         this.listener = Objects.requireNonNull(listener);

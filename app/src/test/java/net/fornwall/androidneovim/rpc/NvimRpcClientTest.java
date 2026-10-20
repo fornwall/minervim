@@ -3,11 +3,14 @@ package net.fornwall.androidneovim.rpc;
 import static org.junit.Assert.*;
 
 import java.io.Closeable;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -18,6 +21,12 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
 public class NvimRpcClientTest {
+    /** Like a LocalSocket, where every read is a system call: the client must read in blocks. */
+    private static final class BlockReads extends FilterInputStream {
+        BlockReads(InputStream input) { super(input); }
+        @Override public int read() throws IOException { throw new IOException("Unbuffered single-byte read"); }
+    }
+
     private static final class Peer implements Closeable {
         final PipedInputStream inbound = new PipedInputStream(65536);
         final PipedOutputStream serverOutput = new PipedOutputStream(inbound);
@@ -31,7 +40,7 @@ public class NvimRpcClientTest {
         Peer() throws IOException { this(Runnable::run, false); }
 
         Peer(Executor executor, boolean failNotification) throws IOException {
-            client = new NvimRpcClient(inbound, outbound, executor, new NvimRpcClient.Listener() {
+            client = new NvimRpcClient(new BlockReads(inbound), outbound, executor, new NvimRpcClient.Listener() {
                 @Override public void onNotification(String method, List<?> arguments) {
                     if (failNotification) throw new IllegalStateException("Broken UI callback");
                     notifications.add(List.of(method, arguments));
@@ -143,6 +152,20 @@ public class NvimRpcClientTest {
             assertTrue(peer.client.request("one_too_many").isCompletedExceptionally());
             peer.client.close();
             assertTrue(futures.stream().allMatch(CompletableFuture::isCompletedExceptionally));
+        }
+    }
+
+    @Test(timeout = 5000) public void decodesLargeFramesThroughTheReadBuffer() throws Exception {
+        try (Peer peer = new Peer()) {
+            CompletableFuture<Object> result = peer.client.request("nvim_get_mode");
+            List<?> request = peer.read();
+            List<Object> cells = new ArrayList<>(Collections.nCopies(30_000, List.of("x")));
+            cells.add(List.of("é".repeat(70_000), 1L));
+            List<?> events = List.of(List.of("grid_line", List.of(1L, 0L, 0L, cells, false)));
+            peer.send(List.of(2L, "redraw", events));
+            peer.send(Arrays.asList(1L, request.get(1), null, "normal"));
+            assertEquals(List.of("redraw", events), peer.notifications.poll(2, TimeUnit.SECONDS));
+            assertEquals("normal", result.get(2, TimeUnit.SECONDS));
         }
     }
 

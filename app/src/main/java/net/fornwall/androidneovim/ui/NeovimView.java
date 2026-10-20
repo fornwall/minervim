@@ -62,6 +62,7 @@ public final class NeovimView extends View {
     private final Path curlPath = new Path();
     private char[] run = new char[256];
     private float fontSize;
+    private float pinchScale = 1;
     private float cellWidth;
     private float cellHeight;
     private float baseline;
@@ -118,11 +119,17 @@ public final class NeovimView extends View {
         maximumFling = configuration.getScaledMaximumFlingVelocity();
         scroller = new OverScroller(context);
         scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            // The gesture scales the last frame; the font and grid size change once, when it ends.
             @Override public boolean onScale(ScaleGestureDetector detector) {
-                setFontSize(fontSize * detector.getScaleFactor());
+                pinchScale = clampFontSize(fontSize * pinchScale * detector.getScaleFactor()) / fontSize;
+                invalidate();
                 return true;
             }
             @Override public void onScaleEnd(ScaleGestureDetector detector) {
+                float size = fontSize * pinchScale;
+                pinchScale = 1;
+                setFontSize(size);
+                invalidate();
                 getContext().getSharedPreferences("editor", Context.MODE_PRIVATE).edit().putFloat("font_size_sp", fontSize).apply();
             }
         });
@@ -231,9 +238,11 @@ public final class NeovimView extends View {
     @Override protected void onDraw(Canvas canvas) {
         NeovimGrid.Frame frame = grid.frame();
         canvas.drawColor(frame.background);
+        int saved = canvas.save();
+        canvas.scale(pinchScale, pinchScale);
         float top = gridTop();
-        int visibleRows = Math.min(frame.rows, (int) Math.ceil(getHeight() / cellHeight));
-        int visibleColumns = Math.min(frame.columns, (int) Math.ceil(getWidth() / cellWidth));
+        int visibleRows = Math.min(frame.rows, (int) Math.ceil(getHeight() / (cellHeight * pinchScale)));
+        int visibleColumns = Math.min(frame.columns, (int) Math.ceil(getWidth() / (cellWidth * pinchScale)));
         // Backgrounds precede all glyphs, so the continuation cell cannot erase a wide glyph.
         for (int row = 0; row < visibleRows; row++) {
             float y = top + row * cellHeight;
@@ -260,10 +269,10 @@ public final class NeovimView extends View {
                     int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
                     textPaints[style].setColor(frame.cursorForeground());
                     // Only the block shows the cursor colors; overhanging ink keeps the cell's own color.
-                    int saved = canvas.save();
+                    int clipped = canvas.save();
                     canvas.clipRect(x, y, right, y + cellHeight);
                     drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, style);
-                    canvas.restoreToCount(saved);
+                    canvas.restoreToCount(clipped);
                 }
             }
             if (!composition.isEmpty()) {
@@ -277,6 +286,7 @@ public final class NeovimView extends View {
                 canvas.drawRect(x, y + cellHeight - 1, Math.min(getWidth(), x + width), y + cellHeight, fill);
             }
         }
+        canvas.restoreToCount(saved);
     }
 
     private static int style(NeovimGrid.Highlight highlight) { return (highlight.bold ? Typeface.BOLD : 0) | (highlight.italic ? Typeface.ITALIC : 0); }

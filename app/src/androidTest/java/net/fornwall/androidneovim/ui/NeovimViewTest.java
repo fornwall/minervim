@@ -459,4 +459,28 @@ public class NeovimViewTest {
             assertEquals(4, log.sizes.size());
         });
     }
+
+    @Test public void pinchScalesTheFrameAndResizesOnceAtTheEnd() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            ResizeLog log = new ResizeLog();
+            view.setListener(log);
+            view.layout(0, 0, 1000, 1000);
+            log.sizes.clear();
+            float before = view.fontSize();
+            long t = 0;
+            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300));
+            for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 20 * i));
+            // During the gesture the last frame is drawn scaled; the font and grid size change once, at its end.
+            assertEquals(before, view.fontSize(), 0);
+            assertTrue(log.sizes.isEmpty());
+            view.draw(new Canvas(Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 500));
+            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 500));
+            assertTrue(view.fontSize() > before);
+            assertEquals(List.of(view.columns() + "x" + view.rows()), log.sizes);
+        });
+    }
 }

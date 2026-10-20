@@ -615,4 +615,25 @@ public class NeovimViewTest {
             assertEquals(List.of("a\n  b"), input.pastes);
         });
     }
+
+    @Test public void composingTextIsCommittedBeforeKeysTapsAndModifiers() {
+        attached((activity, view, input) -> {
+            view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 40, 20)), List.of("flush", List.of())));
+            float w = view.cellWidth(), h = view.cellHeight();
+            // Each commit restarts the IME, which then composes through a new connection.
+            InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.setComposingText("hello", 1));
+            view.sendKey("<Esc>");
+            connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.setComposingText("hi", 1));
+            view.onTouchEvent(touch(0, 0, MotionEvent.ACTION_DOWN, 1.5f * w, 0.5f * h));
+            view.onTouchEvent(touch(0, 50, MotionEvent.ACTION_UP, 1.5f * w, 0.5f * h));
+            connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.setComposingText("x", 1));
+            view.toggleCtrl();
+            connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.setComposingText("w", 1));
+            assertEquals(List.of("hello", "<Esc>", "hi", "left press 0,1", "left release 0,1", "x", "<C-w>"), input.events);
+        });
+    }
 }

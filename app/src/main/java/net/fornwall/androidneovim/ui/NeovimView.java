@@ -427,8 +427,8 @@ public final class NeovimView extends View {
     }
 
     public void setModifierListener(ModifierListener listener) { modifierListener = listener; }
-    public void toggleCtrl() { stickyCtrl = !stickyCtrl; notifyModifiers(); }
-    public void toggleAlt() { stickyAlt = !stickyAlt; notifyModifiers(); }
+    public void toggleCtrl() { commitComposition(); stickyCtrl = !stickyCtrl; notifyModifiers(); }
+    public void toggleAlt() { commitComposition(); stickyAlt = !stickyAlt; notifyModifiers(); }
     private void notifyModifiers() { if (modifierListener != null) modifierListener.onModifiersChanged(stickyCtrl, stickyAlt); }
     private void clearModifiers() {
         if (!stickyCtrl && !stickyAlt) return;
@@ -438,7 +438,7 @@ public final class NeovimView extends View {
 
     /** Sends Neovim key notation. Active sticky modifiers apply to a single key, then clear. */
     public void sendKey(String keys) {
-        cancelComposition();
+        commitComposition();
         input(keys);
     }
 
@@ -461,7 +461,7 @@ public final class NeovimView extends View {
             return;
         }
         if (text != null && listener != null) {
-            cancelComposition();
+            commitComposition();
             listener.paste(text.toString());
         }
     }
@@ -583,8 +583,11 @@ public final class NeovimView extends View {
         }
     }
 
-    private void cancelComposition() {
-        if (!composition.isEmpty()) resetIme();
+    /** Sends composing text literally and without sticky modifiers, so that keys and taps do not discard it. */
+    private void commitComposition() {
+        if (composition.isEmpty()) return;
+        if (listener != null) listener.input(KeyNotation.literal(composition));
+        resetIme();
     }
 
     private void resetIme() {
@@ -617,7 +620,7 @@ public final class NeovimView extends View {
             return true;
         }
         if (unicode == 0) return super.onKeyDown(keyCode, event);
-        cancelComposition();
+        commitComposition();
         if (pendingAccent != 0) {
             int combined = KeyCharacterMap.getDeadChar(pendingAccent, unicode);
             if (combined != 0) unicode = combined;
@@ -645,7 +648,7 @@ public final class NeovimView extends View {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN -> {
                 requestFocus();
-                cancelComposition();
+                commitComposition();
                 stopFling();
                 touchState = TOUCH_PENDING;
                 downX = lastX = x;
@@ -767,7 +770,7 @@ public final class NeovimView extends View {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN -> {
                 requestFocus();
-                cancelComposition();
+                commitComposition();
                 stopFling();
                 pressedButton = (event.getButtonState() & MotionEvent.BUTTON_SECONDARY) != 0 ? "right"
                         : (event.getButtonState() & MotionEvent.BUTTON_TERTIARY) != 0 ? "middle" : "left";
@@ -821,6 +824,7 @@ public final class NeovimView extends View {
         endTouch();
         clearModifiers();
         pendingAccent = 0;
+        if (!composition.isEmpty() && listener != null) listener.input(KeyNotation.literal(composition));
         composition = "";
         connectionGeneration++;
     }

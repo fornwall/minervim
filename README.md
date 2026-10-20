@@ -149,7 +149,7 @@ Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
 lifecycle, including requests from Neovim, command ordering, resize coalescing
-and chunked paste, and document change detection.
+and chunked paste, document change detection, and runtime tree replacement.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
@@ -157,9 +157,10 @@ parsers and their ftplugins, clipboard
 round-trips (including more lines than one RPC message may hold), CRLF paste,
 requests at a "Press ENTER" prompt, deep Vimscript recursion, background saves,
 window focus events, IME line breaks and modes, document write-back through a
-test provider, setup errors, and editor shutdown, including Lua's `os.exit()`.
-UI tests also cover hardware key notation, sticky modifiers, IME lifecycle and
-deletions, mouse modifiers, touch and touchpad gestures, and accessibility.
+test provider, setup errors, runtime updates, and editor shutdown, including
+Lua's `os.exit()`. UI tests also cover hardware key notation, sticky modifiers,
+IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
+accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

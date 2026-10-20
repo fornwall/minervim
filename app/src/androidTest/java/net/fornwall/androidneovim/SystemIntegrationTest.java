@@ -130,6 +130,26 @@ public final class SystemIntegrationTest {
         }
     }
 
+    @Test
+    public void runtimeUpdateReplacesTheOldTreeAndItsHelpTags() throws Exception {
+        // A runtime extracted by an earlier version, with a file that the update removed.
+        File runtime = new File(context.getFilesDir(), "runtime");
+        Files.createDirectories(new File(runtime, "doc").toPath());
+        Files.createDirectories(new File(runtime, "plugin").toPath());
+        Files.writeString(new File(runtime, "doc/tags").toPath(), "stale-topic\tstale.txt\t/*stale-topic*\n");
+        Files.writeString(new File(runtime, "plugin/stale.lua").toPath(), "vim.g.stale_plugin = true\n");
+        Files.writeString(new File(context.getFilesDir(), "runtime-version").toPath(), "0");
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            assertFalse(new File(runtime, "plugin/stale.lua").exists());
+            assertEquals(0L, request("nvim_eval", "exists('g:stale_plugin')"));
+            assertEquals(List.of(false, true), request("nvim_exec_lua", "local stale = pcall(vim.cmd.help, 'stale-topic'); "
+                    + "local current = pcall(vim.cmd.help, 'vim.ui.open()'); return {stale, current}", List.of()));
+            assertEquals("help", request("nvim_get_option_value", "filetype", Map.of("buf", 0)));
+            assertFalse(new File(context.getFilesDir(), "runtime.tmp").exists());
+        }
+    }
+
     private void save(File file, String line) throws Exception {
         request("nvim_exec_lua", "local path, line = ...; vim.cmd.edit(vim.fn.fnameescape(path)); "
                 + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {line}); vim.cmd.write()", List.of(file.getAbsolutePath(), line));

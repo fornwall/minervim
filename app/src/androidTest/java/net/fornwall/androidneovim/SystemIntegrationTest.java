@@ -249,6 +249,20 @@ public final class SystemIntegrationTest {
         return escapes.get();
     }
 
+    @Test
+    public void startupRemovesTemporaryDirectoriesOfEarlierProcesses() throws Exception {
+        File stale = new File(context.getFilesDir(), "tmp/nvim.user/AbCdEf");
+        Files.createDirectories(stale.toPath());
+        Files.writeString(new File(stale, "0").toPath(), "stale");
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            assertFalse(stale.getParentFile().exists());
+            String temporary = (String) request("nvim_call_function", "tempname", List.of());
+            assertTrue(temporary, temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getPath())
+                    || temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getCanonicalPath()));
+        }
+    }
+
     private void save(File file, String line) throws Exception {
         request("nvim_exec_lua", "local path, line = ...; vim.cmd.edit(vim.fn.fnameescape(path)); "
                 + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {line}); vim.cmd.write()", List.of(file.getAbsolutePath(), line));

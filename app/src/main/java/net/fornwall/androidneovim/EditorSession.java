@@ -116,6 +116,11 @@ final class EditorSession implements NeovimView.Listener {
             }
             // Neovim has not started, so no buffer holds a copy that is deleted now.
             documents.prune();
+            // Neovim's temporary directories under TMPDIR (files/tmp) outlive a process that Android ends.
+            File[] temporary = new File(home, "tmp").listFiles((directory, name) -> name.startsWith("nvim."));
+            if (temporary != null) {
+                for (File stale : temporary) try { FileTrees.delete(stale); } catch (IOException ignored) { }
+            }
             File notes = new File(home, "notes.txt");
             if (!notes.exists()) {
                 Files.writeString(notes.toPath(), "Welcome to Neovim on Android.\n\n"

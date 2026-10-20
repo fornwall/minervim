@@ -57,6 +57,40 @@ public class NeovimGridTest {
         assertEquals("D", grid.frame().text(3, 1));
     }
 
+    @Test public void framesShareUnchangedRowsAndKeepTheirOwnContents() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("grid_resize", 1, 3, 4), line(0, 0, cell("a", 1)), line(1, 0, cell("b", 1)),
+                line(2, 0, cell("c", 1)), line(3, 0, cell("d", 1)), flush()));
+        NeovimGrid.Frame first = grid.frame();
+        grid.handleRedraw(List.of(line(1, 1, cell("x", 2)), flush()));
+        NeovimGrid.Frame second = grid.frame();
+        assertTrue(second.sharesRow(0, first, 0));
+        assertTrue(second.sharesRow(2, first, 2));
+        assertFalse(second.sharesRow(1, first, 1));
+        assertEquals(" ", first.text(1, 1));
+        assertEquals("x", second.text(1, 1));
+        // Full-width scrolls move rows; the row scrolled in is cleared without touching published frames.
+        grid.handleRedraw(List.of(event("grid_scroll", 1, 0, 4, 0, 3, 1, 0), line(3, 0, cell("e", 1)), flush()));
+        NeovimGrid.Frame third = grid.frame();
+        for (int row = 0; row < 3; row++) assertTrue(third.sharesRow(row, second, row + 1));
+        assertEquals("e", third.text(3, 0));
+        assertEquals(" ", third.text(3, 1));
+        assertEquals(0, third.attribute(3, 1));
+        assertEquals("a", second.text(0, 0));
+        assertEquals("d", second.text(3, 0));
+        grid.handleRedraw(List.of(event("grid_scroll", 1, 1, 4, 0, 3, -2, 0), flush()));
+        NeovimGrid.Frame fourth = grid.frame();
+        assertTrue(fourth.sharesRow(0, third, 0));
+        assertTrue(fourth.sharesRow(3, third, 1));
+        assertEquals(" ", fourth.text(1, 0));
+        assertEquals(" ", fourth.text(2, 0));
+        assertEquals("c", third.text(1, 0));
+        grid.handleRedraw(List.of(event("grid_clear", 1), flush()));
+        assertEquals(" ", grid.frame().text(0, 0));
+        assertEquals("b", fourth.text(0, 0));
+        assertEquals("x", fourth.text(0, 1));
+    }
+
     @Test public void scrollColumnsDoesNotOverwriteSources() {
         NeovimGrid grid = new NeovimGrid();
         grid.handleRedraw(List.of(event("grid_resize", 1, 4, 1),

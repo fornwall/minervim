@@ -43,7 +43,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - Touch: tap moves the cursor and shows the keyboard, drag or fling scrolls,
   long-press then drag selects (Visual mode), and pinch changes the font size
   (8–32 sp, remembered). Scroll steps assume the default `mousescroll`. A mouse
-  keeps ordinary button, drag and wheel semantics.
+  keeps ordinary button, drag and wheel semantics, with keyboard modifiers and
+  horizontal wheels. Touchpad two-finger swipes scroll and pinches zoom.
 - The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
   from the row, the soft keyboard, or a hardware keyboard.
 - Keyboard, local IME composition, and clipboard paste are supported. **Paste**

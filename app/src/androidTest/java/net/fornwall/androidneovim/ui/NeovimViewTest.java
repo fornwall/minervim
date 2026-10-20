@@ -38,7 +38,7 @@ public class NeovimViewTest {
         @Override public void input(String input) { keys.add(input); events.add(input); }
         @Override public void paste(String text) { pastes.add(text); events.add("paste " + text); }
         @Override public void mouse(String button, String action, String modifiers, int row, int column) {
-            String event = button + " " + action + " " + row + "," + column;
+            String event = button + " " + action + " " + (modifiers.isEmpty() ? "" : modifiers + " ") + row + "," + column;
             mouse.add(event);
             events.add(event);
         }
@@ -205,6 +205,11 @@ public class NeovimViewTest {
 
     /** Two fingers {@code span} pixels apart, centred at (500, 500). */
     private static MotionEvent pinch(long time, int action, int pointers, float span) {
+        return pinch(time, action, pointers, span, 1, InputDevice.SOURCE_TOUCHSCREEN, MotionEvent.CLASSIFICATION_NONE);
+    }
+
+    /** Touchpad pinches also report the scale factor since the previous event. */
+    private static MotionEvent pinch(long time, int action, int pointers, float span, float scale, int source, int classification) {
         var properties = new MotionEvent.PointerProperties[pointers];
         var coordinates = new MotionEvent.PointerCoords[pointers];
         for (int i = 0; i < pointers; i++) {
@@ -214,8 +219,9 @@ public class NeovimViewTest {
             coordinates[i] = new MotionEvent.PointerCoords();
             coordinates[i].x = 500 + (i == 0 ? -span : span) / 2;
             coordinates[i].y = 500;
+            coordinates[i].setAxisValue(MotionEvent.AXIS_GESTURE_PINCH_SCALE_FACTOR, scale);
         }
-        return MotionEvent.obtain(0, time, action, pointers, properties, coordinates, 0, 0, 1, 1, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0);
+        return MotionEvent.obtain(0, time, action, pointers, properties, coordinates, 0, 0, 1, 1, 0, 0, source, 0, 0, classification);
     }
 
     @Test public void longPressDragSelectsAndCancelReleases() throws Exception {
@@ -705,6 +711,90 @@ public class NeovimViewTest {
             // Beyond the committed text, each unit is one character.
             assertTrue(connection.deleteSurroundingText(2, 0));
             assertEquals(List.of("a😀", "<BS>", "<BS><Del>", "<BS><BS>"), input.keys);
+        });
+    }
+
+    private static MotionEvent mouse(int action, int buttons, int meta, float x, float y) {
+        var properties = new MotionEvent.PointerProperties();
+        properties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+        var coordinates = new MotionEvent.PointerCoords();
+        coordinates.x = x;
+        coordinates.y = y;
+        return MotionEvent.obtain(0, 10, action, 1, new MotionEvent.PointerProperties[] {properties},
+                new MotionEvent.PointerCoords[] {coordinates}, meta, buttons, 1, 1, 0, 0, InputDevice.SOURCE_MOUSE, 0);
+    }
+
+    private static MotionEvent wheel(float vertical, float horizontal, int meta) {
+        var properties = new MotionEvent.PointerProperties();
+        properties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+        var coordinates = new MotionEvent.PointerCoords();
+        coordinates.setAxisValue(MotionEvent.AXIS_VSCROLL, vertical);
+        coordinates.setAxisValue(MotionEvent.AXIS_HSCROLL, horizontal);
+        return MotionEvent.obtain(0, 10, MotionEvent.ACTION_SCROLL, 1, new MotionEvent.PointerProperties[] {properties},
+                new MotionEvent.PointerCoords[] {coordinates}, meta, 0, 1, 1, 0, 0, InputDevice.SOURCE_MOUSE, 0);
+    }
+
+    /** A touchpad two-finger swipe, which Android reports as one fake finger from a mouse source. */
+    private static MotionEvent swipe(long time, int action, float x, float y) {
+        var properties = new MotionEvent.PointerProperties();
+        properties.id = 0;
+        properties.toolType = MotionEvent.TOOL_TYPE_FINGER;
+        var coordinates = new MotionEvent.PointerCoords();
+        coordinates.x = x;
+        coordinates.y = y;
+        return MotionEvent.obtain(0, time, action, 1, new MotionEvent.PointerProperties[] {properties},
+                new MotionEvent.PointerCoords[] {coordinates}, 0, 0, 1, 1, 0, 0, InputDevice.SOURCE_MOUSE, 0, 0,
+                MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE);
+    }
+
+    @Test public void mouseSendsModifiersAndHorizontalWheel() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            view.setListener(input);
+            float w = view.cellWidth(), h = view.cellHeight();
+            int ctrl = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON;
+            view.onTouchEvent(mouse(MotionEvent.ACTION_DOWN, MotionEvent.BUTTON_PRIMARY, ctrl, 1.5f * w, 2.5f * h));
+            view.onTouchEvent(mouse(MotionEvent.ACTION_UP, 0, ctrl, 1.5f * w, 2.5f * h));
+            assertTrue(view.onGenericMotionEvent(wheel(0, 1, 0)));
+            assertTrue(view.onGenericMotionEvent(wheel(-0.5f, -1, 0)));
+            assertTrue(view.onGenericMotionEvent(wheel(-0.5f, 0, KeyEvent.META_SHIFT_ON | KeyEvent.META_SHIFT_LEFT_ON)));
+            assertEquals(List.of("left press C- 2,1", "left release C- 2,1", "wheel right 0,0", "wheel left 0,0",
+                    "wheel down S- 0,0"), input.mouse);
+        });
+    }
+
+    @Test public void touchpadSwipesScrollAndPinchesZoom() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            view.setListener(input);
+            float w = view.cellWidth(), h = view.cellHeight();
+            view.onTouchEvent(swipe(0, MotionEvent.ACTION_DOWN, 5.5f * w, 15.5f * h));
+            for (int i = 1; i <= 13; i++) view.onTouchEvent(swipe(200 * i, MotionEvent.ACTION_MOVE, 5.5f * w, (15.5f - i) * h));
+            view.onTouchEvent(swipe(5000, MotionEvent.ACTION_UP, 5.5f * w, 2.5f * h));
+            // Android sends a stationary swipe to stop a fling; it is not a click.
+            view.onTouchEvent(swipe(6000, MotionEvent.ACTION_DOWN, 5.5f * w, 2.5f * h));
+            view.onTouchEvent(swipe(6010, MotionEvent.ACTION_UP, 5.5f * w, 2.5f * h));
+            assertEquals(List.of("wheel down 15,5", "wheel down 15,5", "wheel down 15,5", "wheel down 15,5"), input.mouse);
+            input.mouse.clear();
+            float before = view.fontSize();
+            long t = 7000;
+            int source = InputDevice.SOURCE_MOUSE, pinch = MotionEvent.CLASSIFICATION_PINCH;
+            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300, 1, source, pinch));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300, 1, source, pinch));
+            for (int i = 1; i <= 10; i++) {
+                float scale = (300 + 40 * i) / (300 + 40 * (i - 1f));
+                view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 40 * i, scale, source, pinch));
+            }
+            // Like a touchscreen pinch, it scales the frame and changes the font only when it ends.
+            assertEquals(before, view.fontSize(), 0);
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 700, 1, source, pinch));
+            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 700, 1, source, pinch));
+            assertTrue(view.fontSize() > before);
+            assertTrue(input.mouse.isEmpty());
         });
     }
 }

@@ -45,7 +45,8 @@ public final class NeovimView extends View {
     public interface ModifierListener { void onModifiersChanged(boolean ctrl, boolean alt); }
 
     private static final String ASCII = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
-    private static final int TOUCH_IDLE = 0, TOUCH_PENDING = 1, TOUCH_SCROLL = 2, TOUCH_SELECT = 3, TOUCH_PINCH = 4;
+    // TOUCH_SWIPE is a touchpad two-finger swipe before it passes the slop: never a tap or long press.
+    private static final int TOUCH_IDLE = 0, TOUCH_PENDING = 1, TOUCH_SCROLL = 2, TOUCH_SELECT = 3, TOUCH_PINCH = 4, TOUCH_SWIPE = 5;
     // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     /** IME deletions, and the committed text they are counted over, are bounded to this many characters. */
@@ -92,7 +93,7 @@ public final class NeovimView extends View {
     private String pressedButton;
     private int pressedRow;
     private int pressedColumn;
-    private float wheelRemainder;
+    private float wheelRemainder, horizontalWheelRemainder;
     private final ScaleGestureDetector scaleDetector;
     private final OverScroller scroller;
     private final int touchSlop;
@@ -694,7 +695,13 @@ public final class NeovimView extends View {
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
-        if (event.isFromSource(InputDevice.SOURCE_MOUSE) || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) return mouseEvent(event);
+        // Android reports touchpad two-finger swipes and pinches as fake fingers from a mouse source; they scroll
+        // and zoom like touch. Other classified touchpad gestures, such as three-finger swipes, are the system's.
+        int classification = event.getClassification();
+        if (classification != MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE && classification != MotionEvent.CLASSIFICATION_PINCH
+                && (event.isFromSource(InputDevice.SOURCE_MOUSE) || event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE)) {
+            return classification == MotionEvent.CLASSIFICATION_NONE && mouseEvent(event);
+        }
         scaleDetector.onTouchEvent(event);
         if (velocity != null) velocity.addMovement(event);
         float x = event.getX(), y = event.getY();
@@ -703,7 +710,7 @@ public final class NeovimView extends View {
                 requestFocus();
                 commitComposition();
                 stopFling();
-                touchState = TOUCH_PENDING;
+                touchState = classification == MotionEvent.CLASSIFICATION_TWO_FINGER_SWIPE ? TOUCH_SWIPE : TOUCH_PENDING;
                 downX = lastX = x;
                 downY = lastY = y;
                 scrollX = scrollY = 0;
@@ -721,7 +728,7 @@ public final class NeovimView extends View {
                 touchState = TOUCH_PINCH;
             }
             case MotionEvent.ACTION_MOVE -> {
-                if (touchState == TOUCH_PENDING && Math.hypot(x - downX, y - downY) > touchSlop) {
+                if ((touchState == TOUCH_PENDING || touchState == TOUCH_SWIPE) && Math.hypot(x - downX, y - downY) > touchSlop) {
                     removeCallbacks(longPress);
                     touchState = TOUCH_SCROLL;
                     horizontalScroll = Math.abs(x - downX) > Math.abs(y - downY);
@@ -820,6 +827,7 @@ public final class NeovimView extends View {
 
     private boolean mouseEvent(MotionEvent event) {
         int row = row(event.getY()), column = column(event.getX());
+        String modifiers = KeyNotation.modifiers(event.getMetaState(), true);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN -> {
                 requestFocus();
@@ -829,17 +837,17 @@ public final class NeovimView extends View {
                         : (event.getButtonState() & MotionEvent.BUTTON_TERTIARY) != 0 ? "middle" : "left";
                 pressedRow = row;
                 pressedColumn = column;
-                if (listener != null) listener.mouse(pressedButton, "press", "", row, column);
+                if (listener != null) listener.mouse(pressedButton, "press", modifiers, row, column);
             }
             case MotionEvent.ACTION_MOVE -> {
                 if (pressedButton != null && (row != pressedRow || column != pressedColumn)) {
                     pressedRow = row;
                     pressedColumn = column;
-                    if (listener != null) listener.mouse(pressedButton, "drag", "", row, column);
+                    if (listener != null) listener.mouse(pressedButton, "drag", modifiers, row, column);
                 }
             }
             case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (pressedButton != null && listener != null) listener.mouse(pressedButton, "release", "", row, column);
+                if (pressedButton != null && listener != null) listener.mouse(pressedButton, "release", modifiers, row, column);
                 pressedButton = null;
                 if (event.getActionMasked() == MotionEvent.ACTION_UP) { performClick(); showKeyboard(); }
             }
@@ -852,12 +860,19 @@ public final class NeovimView extends View {
 
     @Override public boolean onGenericMotionEvent(MotionEvent event) {
         if (event.getAction() != MotionEvent.ACTION_SCROLL || listener == null) return super.onGenericMotionEvent(event);
-        wheelRemainder += event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-        int ticks = Math.max(-32, Math.min(32, (int) wheelRemainder));
-        wheelRemainder -= ticks;
         int row = row(event.getY()), column = column(event.getX());
-        for (int i = 0; i < Math.abs(ticks); i++) listener.mouse("wheel", ticks > 0 ? "up" : "down", "", row, column);
+        String modifiers = KeyNotation.modifiers(event.getMetaState(), true);
+        wheelRemainder = wheelSteps(wheelRemainder + event.getAxisValue(MotionEvent.AXIS_VSCROLL), "up", "down", modifiers, row, column);
+        horizontalWheelRemainder = wheelSteps(horizontalWheelRemainder + event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+                "right", "left", modifiers, row, column);
         return true;
+    }
+
+    /** Sends the whole wheel steps in {@code amount}, at most 32, and returns the remainder. */
+    private float wheelSteps(float amount, String positive, String negative, String modifiers, int row, int column) {
+        int ticks = Math.max(-32, Math.min(32, (int) amount));
+        for (int i = 0; i < Math.abs(ticks); i++) listener.mouse("wheel", ticks > 0 ? positive : negative, modifiers, row, column);
+        return amount - ticks;
     }
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {

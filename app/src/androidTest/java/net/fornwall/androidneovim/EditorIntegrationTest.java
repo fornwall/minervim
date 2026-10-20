@@ -194,12 +194,40 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void requestsAtAPromptDoNotHoldBackInput() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            File autosaved = new File(context.getFilesDir(), "prompt-autosave.txt");
+            request(session, "nvim_exec_lua", "vim.cmd('enew!'); vim.api.nvim_buf_set_name(0, ...); "
+                    + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {'kept'})", List.of(autosaved.getAbsolutePath()));
+            // At "Press ENTER", Neovim reads keys but defers other requests until the prompt ends.
+            activity.onActivity(a -> session.input(":echo \"a\\nb\\nc\"<CR>"));
+            await(() -> Boolean.TRUE.equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("blocking")));
+            AtomicReference<Integer> columns = new AtomicReference<>();
+            activity.onActivity(a -> {
+                session.background();
+                columns.set(a.editorView().columns() - 1);
+                session.resize(columns.get(), a.editorView().rows());
+                session.input("<CR>");
+            });
+            await(() -> autosaved.isFile() && Files.readString(autosaved.toPath()).equals("kept\n"));
+            Map<?, ?> mode = (Map<?, ?>) request(session, "nvim_get_mode");
+            assertEquals("n", mode.get("mode"));
+            assertEquals(false, mode.get("blocking"));
+            assertEquals((long) columns.get(), ((Map<?, ?>) ((List<?>) request(session, "nvim_list_uis")).get(0)).get("width"));
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));
         return info.inputType & InputType.TYPE_MASK_CLASS;
     }
 
+    /** Waits until the UI is attached and the application's initial file has opened. */
     private static void awaitUi(EditorSession session) throws Exception {
         await(() -> {
             try { return !((List<?>) request(session, "nvim_list_uis")).isEmpty(); }

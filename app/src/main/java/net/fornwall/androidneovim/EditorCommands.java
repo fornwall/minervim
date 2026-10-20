@@ -3,25 +3,45 @@ package net.fornwall.androidneovim;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
-/** Orders editor actions after input retries. All calls and callbacks belong to one serial executor. */
+/**
+ * Orders editor actions after input retries. All calls and callbacks belong to one serial executor.
+ * Neovim accepts input on receipt, but defers most requests until it next waits for typed input,
+ * after earlier typeahead. At a prompt or pending key ("Press ENTER", {@code g}, {@code r}, ...) it reads
+ * keys without running them, so a sent request must never hold back later input.
+ */
 final class EditorCommands {
     @FunctionalInterface
     interface Requester {
         CompletableFuture<Object> request(String method, Object... arguments);
     }
 
-    private static final int MAX_OPERATIONS = 256;
+    private static final String RESIZE = "nvim_ui_try_resize";
+    /** Requests later input may overtake: fast calls, which Neovim runs on receipt, and resizes. */
+    private static final Set<String> UNORDERED = Set.of("nvim_get_mode", "nvim_input_mouse", RESIZE);
+    /** Below the RPC client's pending limit, so requests stuck at a prompt leave room for input. */
+    private static final int MAX_OPERATIONS = 128;
     private static final int MAX_INPUT_BYTES = 64 * 1024;
     private final Requester requester;
     private final Executor callbacks;
     private final Consumer<Runnable> retryLater;
+    /** Unsent operations; the head may be input that Neovim has partially accepted. */
     private final ArrayDeque<Operation> queue = new ArrayDeque<>();
+    /** Sent requests awaiting a reply. */
+    private final Set<Operation> sent = new LinkedHashSet<>();
+    private boolean inputting;
+    /** Requests were sent since the last probe that later input must not overtake. */
+    private boolean unordered;
+    private boolean probing;
     private int inputBytes;
     private Throwable closed;
 
@@ -44,6 +64,7 @@ final class EditorCommands {
         return enqueue(new Operation(bytes));
     }
 
+    /** Sent once all earlier input is accepted. */
     CompletableFuture<Object> request(String method, Object... arguments) {
         return enqueue(new Operation(Objects.requireNonNull(method), arguments.clone()));
     }
@@ -51,42 +72,73 @@ final class EditorCommands {
     void close(Throwable cause) {
         if (closed != null) return;
         closed = Objects.requireNonNull(cause);
-        Operation[] pending = queue.toArray(new Operation[0]);
+        List<Operation> pending = new ArrayList<>(queue);
+        pending.addAll(sent);
         queue.clear();
+        sent.clear();
         inputBytes = 0;
         for (Operation operation : pending) operation.result.completeExceptionally(cause);
     }
 
     private CompletableFuture<Object> enqueue(Operation operation) {
         if (closed != null) return CompletableFuture.failedFuture(closed);
-        if (queue.size() >= MAX_OPERATIONS)
+        // Requests awaiting replies count too, but cannot block input, which may be what ends a prompt.
+        int used = queue.size() + (operation.input == null ? sent.size() : 0);
+        if (used >= MAX_OPERATIONS)
             return CompletableFuture.failedFuture(new IOException("Editor command queue is full"));
-        boolean start = queue.isEmpty();
         queue.add(operation);
         if (operation.input != null) inputBytes += operation.input.length;
-        if (start) send(operation);
+        advance();
         return operation.result;
+    }
+
+    /** Sends requests after all earlier input is accepted, and input after earlier requests could run. */
+    private void advance() {
+        while (closed == null && !inputting && !probing) {
+            Operation next = queue.peek();
+            if (next == null) return;
+            if (next.input == null) sendRequest(queue.remove());
+            else if (unordered) probe();
+            else {
+                inputting = true;
+                send(next);
+            }
+        }
+    }
+
+    /**
+     * Neovim answers nvim_get_mode after the requests sent before it, or at once while it blocks
+     * for a key, when those requests cannot run before more input. Either way input may follow.
+     */
+    private void probe() {
+        unordered = false;
+        probing = true;
+        call("nvim_get_mode").whenCompleteAsync((ignored, error) -> {
+            probing = false;
+            advance();
+        }, callbacks);
+    }
+
+    private void sendRequest(Operation operation) {
+        if (!UNORDERED.contains(operation.method)) unordered = true;
+        sent.add(operation);
+        call(operation.method, operation.arguments)
+                .whenCompleteAsync((result, error) -> answered(operation, result, error), callbacks);
+    }
+
+    private void answered(Operation operation, Object result, Throwable error) {
+        if (sent.remove(operation)) complete(operation, result, error);
     }
 
     private void send(Operation operation) {
         if (closed != null || queue.peek() != operation) return;
-        CompletableFuture<Object> response;
-        try {
-            response = operation.input == null
-                    ? requester.request(operation.method, operation.arguments)
-                    : requester.request("nvim_input", Arrays.copyOfRange(
-                            operation.input, operation.offset, operation.input.length));
-            Objects.requireNonNull(response, "Requester returned no future");
-        } catch (Exception failure) {
-            finish(operation, null, failure);
-            return;
-        }
-        response.whenCompleteAsync((result, error) -> finish(operation, result, error), callbacks);
+        call("nvim_input", (Object) Arrays.copyOfRange(operation.input, operation.offset, operation.input.length))
+                .whenCompleteAsync((result, error) -> finish(operation, result, error), callbacks);
     }
 
     private void finish(Operation operation, Object result, Throwable error) {
         if (closed != null || queue.peek() != operation) return;
-        if (error == null && operation.input != null) {
+        if (error == null) {
             int remaining = operation.input.length - operation.offset;
             if (!(result instanceof Number number) || number.longValue() < 0
                     || number.longValue() > remaining) {
@@ -103,11 +155,23 @@ final class EditorCommands {
                 result = (long) operation.input.length;
             }
         }
-        if (operation.input != null) inputBytes -= operation.input.length - operation.offset;
+        inputBytes -= operation.input.length - operation.offset;
         queue.remove();
+        inputting = false;
         // Start the next queued action before completing a future whose continuations can enqueue more.
-        Operation next = queue.peek();
-        if (next != null) send(next);
+        advance();
+        complete(operation, result, error);
+    }
+
+    private CompletableFuture<Object> call(String method, Object... arguments) {
+        try {
+            return Objects.requireNonNull(requester.request(method, arguments), "Requester returned no future");
+        } catch (Exception failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
+    private static void complete(Operation operation, Object result, Throwable error) {
         if (error == null) operation.result.complete(result);
         else operation.result.completeExceptionally(error);
     }

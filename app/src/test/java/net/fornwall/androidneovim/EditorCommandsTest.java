@@ -8,6 +8,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.junit.Test;
 
@@ -15,36 +16,82 @@ public class EditorCommandsTest {
     private static final class Fake {
         final List<String> methods = new ArrayList<>();
         final List<Object[]> arguments = new ArrayList<>();
+        final List<CompletableFuture<Object>> calls = new ArrayList<>();
         final ArrayDeque<CompletableFuture<Object>> replies = new ArrayDeque<>();
         final ArrayDeque<Runnable> retries = new ArrayDeque<>();
         final EditorCommands commands = new EditorCommands((method, args) -> {
             methods.add(method);
             arguments.add(args);
             CompletableFuture<Object> reply = new CompletableFuture<>();
+            calls.add(reply);
             replies.add(reply);
             return reply;
         }, Runnable::run, retries::add);
 
+        /** Answers the oldest unanswered call. */
         void reply(Object value) { replies.remove().complete(value); }
+
+        /** Answers a call by its index in {@link #methods}, as Neovim may for a deferred request. */
+        void answer(int call, Object value) {
+            replies.remove(calls.get(call));
+            calls.get(call).complete(value);
+        }
     }
 
     @Test public void pasteAndSaveStayBehindEarlierInput() {
         Fake fake = new Fake();
         fake.commands.input("i");
         fake.commands.input("abc");
-        CompletableFuture<Object> paste = fake.commands.request("nvim_paste", "XYZ", false, -1);
+        CompletableFuture<Object> paste = fake.commands.request("nvim_paste", "XYZ", true, -1);
         CompletableFuture<Object> save = fake.commands.request("nvim_command", "write");
         assertEquals(List.of("nvim_input"), fake.methods);
         fake.reply(1L);
         assertEquals(List.of("nvim_input", "nvim_input"), fake.methods);
         assertArrayEquals("abc".getBytes(StandardCharsets.UTF_8), (byte[]) fake.arguments.get(1)[0]);
         fake.reply(3L);
-        assertEquals(List.of("nvim_input", "nvim_input", "nvim_paste"), fake.methods);
-        fake.reply(true);
+        // Neovim runs one channel's requests in order, so they need not wait for each other's replies.
         assertEquals(List.of("nvim_input", "nvim_input", "nvim_paste", "nvim_command"), fake.methods);
+        fake.reply(true);
         assertEquals(true, paste.join());
         fake.reply(null);
         assertTrue(save.isDone());
+    }
+
+    @Test public void unansweredRequestDoesNotHoldBackLaterInput() {
+        // At "Press ENTER", Neovim accepts input and answers nvim_get_mode, but defers other requests.
+        Fake fake = new Fake();
+        CompletableFuture<Object> autosave = fake.commands.request("nvim_exec_lua", "AndroidNeovim.background()", List.of());
+        CompletableFuture<Object> enter = fake.commands.input("<CR>");
+        assertEquals(List.of("nvim_exec_lua", "nvim_get_mode"), fake.methods);
+        fake.commands.input("x");
+        fake.answer(1, Map.of("mode", "r", "blocking", true));
+        assertEquals(List.of("nvim_exec_lua", "nvim_get_mode", "nvim_input"), fake.methods);
+        fake.answer(2, 4L);
+        assertEquals(4L, enter.join());
+        assertEquals(List.of("nvim_exec_lua", "nvim_get_mode", "nvim_input", "nvim_input"), fake.methods);
+        fake.answer(3, 1L);
+        assertFalse(autosave.isDone());
+        fake.answer(0, null);
+        assertTrue(autosave.isDone());
+    }
+
+    @Test public void inputAfterARequestWaitsUntilNeovimCouldRunIt() {
+        Fake fake = new Fake();
+        CompletableFuture<Object> paste = fake.commands.request("nvim_paste", "XYZ", true, -1);
+        fake.commands.input("def");
+        assertEquals(List.of("nvim_paste", "nvim_get_mode"), fake.methods);
+        // Not blocked at a prompt: the paste ran before Neovim answered the probe.
+        fake.reply(true);
+        fake.reply(Map.of("mode", "i", "blocking", false));
+        assertEquals(true, paste.join());
+        assertEquals(List.of("nvim_paste", "nvim_get_mode", "nvim_input"), fake.methods);
+        // Fast calls and resizes need no probe.
+        fake.reply(3L);
+        fake.commands.request("nvim_input_mouse", "left", "press", "", 0, 1, 2);
+        fake.commands.request("nvim_ui_try_resize", 80, 24);
+        fake.commands.input("g");
+        assertEquals(List.of("nvim_paste", "nvim_get_mode", "nvim_input", "nvim_input_mouse",
+                "nvim_ui_try_resize", "nvim_input"), fake.methods);
     }
 
     @Test public void partialUtf8IsRetriedAsExactBytesBeforeNextCommand() {
@@ -94,8 +141,32 @@ public class EditorCommandsTest {
         fake.reply(65536L);
         assertEquals(65536L, full.join());
         assertFalse(fake.commands.input("x").isCompletedExceptionally());
-        for (int i = 0; i < 255; i++) fake.commands.request("nvim_get_mode");
+        for (int i = 0; i < 127; i++) assertFalse(fake.commands.request("nvim_get_mode").isCompletedExceptionally());
         assertTrue(fake.commands.request("overflow").isCompletedExceptionally());
+    }
+
+    @Test public void requestsAwaitingRepliesCountButLeaveRoomForInput() {
+        Fake fake = new Fake();
+        for (int i = 0; i < 128; i++) fake.commands.request("nvim_command", "echo");
+        assertEquals(128, fake.methods.size());
+        assertTrue(fake.commands.request("overflow").isCompletedExceptionally());
+        assertFalse(fake.commands.input("<CR>").isCompletedExceptionally());
+        assertTrue(fake.commands.request("overflow").isCompletedExceptionally());
+        fake.reply(null);
+        fake.reply(null);
+        assertFalse(fake.commands.request("nvim_command", "echo").isCompletedExceptionally());
+    }
+
+    @Test public void closeFailsSentRequests() {
+        Fake fake = new Fake();
+        CompletableFuture<Object> command = fake.commands.request("nvim_command", "write");
+        CompletableFuture<Object> resize = fake.commands.request("nvim_ui_try_resize", 2, 2);
+        fake.commands.close(new IOException("Disconnected"));
+        assertTrue(command.isCompletedExceptionally());
+        assertTrue(resize.isCompletedExceptionally());
+        fake.reply(null);
+        fake.reply(null);
+        assertEquals(2, fake.methods.size());
     }
 
     @Test public void invalidInputResultFailsAndReleasesInputBudget() {

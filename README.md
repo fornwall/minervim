@@ -110,7 +110,10 @@ IME surrounding-text behavior are future work.
 - `native/`: pinned upstream download, cross-build patches, JNI startup, exit and
   subprocess adapters. Process signal handling remains with Android.
 - `EditorSession`: app-lifetime native session, private Unix socket transport,
-  runtime extraction, UI attachment, clipboard, and byte-preserving input retries.
+  runtime extraction, UI attachment, and clipboard. `EditorCommands` orders
+  requests after earlier input and retries input byte-exactly. Neovim defers most
+  requests while it waits at a prompt or for a pending key, so a sent request never
+  holds back later input.
   Android integration Lua lives in `app/src/main/assets/android/init.lua`.
 - `Documents`: local copies of Android documents and write-back to originals.
 - `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure.
@@ -130,15 +133,15 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
-lifecycle, including requests from Neovim.
+lifecycle, including requests from Neovim, and command ordering.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
-round-trips, background saves, window focus events, IME line breaks and modes,
-and editor shutdown. UI tests also cover hardware key notation, sticky modifiers,
-IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
-accessibility.
+round-trips, requests at a "Press ENTER" prompt, background saves, window focus
+events, IME line breaks and modes, and editor shutdown. UI tests also cover
+hardware key notation, sticky modifiers, IME lifecycle and deletions, mouse
+modifiers, touch and touchpad gestures, and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

@@ -9,14 +9,18 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.view.View;
+import android.webkit.MimeTypeMap;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -179,6 +183,44 @@ public final class SystemIntegrationTest {
                     started.stream().map(intent -> intent.getData().toString()).toList());
             assertEquals(List.of(true, true), request("nvim_exec_lua", "local cmd, err = vim.ui.open('notes.txt'); "
                     + "return {cmd == nil, err:find('not files', 1, true) ~= nil}", List.of()));
+        } finally {
+            instrumentation.removeMonitor(monitor);
+        }
+    }
+
+    @Test
+    public void exportWritesFirstAndKeepsTheFileExtension() throws Exception {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        Uri destination = TestDocumentProvider.uri("export-" + System.nanoTime());
+        List<Intent> started = new CopyOnWriteArrayList<>();
+        Instrumentation.ActivityMonitor monitor = new Instrumentation.ActivityMonitor() {
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent intent) {
+                if (!Intent.ACTION_CREATE_DOCUMENT.equals(intent.getAction())) return null;
+                started.add(new Intent(intent));
+                return new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(destination));
+            }
+        };
+        instrumentation.addMonitor(monitor);
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            File file = new File(context.getFilesDir(), "init.lua");
+            request("nvim_exec_lua", "vim.cmd.edit(vim.fn.fnameescape(...)); vim.api.nvim_buf_set_lines(0, 0, -1, true, {'return 1'})",
+                    List.of(file.getAbsolutePath()));
+            activity.onActivity(a -> {
+                ArrayList<View> buttons = new ArrayList<>();
+                a.getWindow().getDecorView().findViewsWithText(buttons, "Export a copy of the current file",
+                        View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+                assertTrue(buttons.get(0).performClick());
+            });
+            await(() -> {
+                try { return readOriginal(destination).equals("return 1\n"); }
+                catch (IOException notYet) { return false; }
+            });
+            assertEquals("return 1\n", Files.readString(file.toPath()));
+            assertEquals("init.lua", started.get(0).getStringExtra(Intent.EXTRA_TITLE));
+            // A text/plain type would make providers save init.lua.txt.
+            String type = MimeTypeMap.getSingleton().getMimeTypeFromExtension("lua");
+            assertEquals(type == null ? "application/octet-stream" : type, started.get(0).getType());
         } finally {
             instrumentation.removeMonitor(monitor);
         }

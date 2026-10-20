@@ -37,10 +37,11 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   content. When Android grants write access, each write also updates the
   original, and that grant is persisted. A write stays local, with a notice, if
   the original is read-only or changed elsewhere since it was opened or last
-  updated (by modification time and size, else content). **Export** writes a copy
-  to a destination chosen through Android. Documents are limited to 4 MiB. A copy
-  replaced by a newer one, or forgotten after 64 newer documents, is deleted at the
-  next start unless it has local changes.
+  updated (by modification time and size, else content). **Export** saves the
+  current file, then writes a copy with the same name to a destination chosen
+  through Android. Documents are limited to 4 MiB. A copy replaced by a newer
+  one, or forgotten after 64 newer documents, is deleted at the next start unless
+  it has local changes.
 - The `+` and `*` registers use Android's clipboard: `"+y`, `"+p`, and
   `clipboard=unnamedplus` work without a clipboard tool. **Copy** copies the
   visual selection, or the current line outside visual mode. Clipboard text is

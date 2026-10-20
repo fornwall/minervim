@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.webkit.MimeTypeMap;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -16,6 +17,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import net.fornwall.androidneovim.ui.NeovimView;
@@ -23,17 +25,21 @@ import net.fornwall.androidneovim.ui.NeovimView;
 public final class MainActivity extends Activity {
     private static final int OPEN = 1;
     private static final int EXPORT = 2;
+    private static final String EXPORTING = "exporting";
     private final List<Button> actions = new ArrayList<>();
     private EditorSession session;
     private NeovimView editor;
     private LinearLayout statusRow;
     private TextView status;
     private Button restart;
+    /** The file being exported; it outlives process death while Android's picker is shown. */
+    private String exporting;
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
         session = ((EditorApplication) getApplication()).session();
+        if (state != null) exporting = state.getString(EXPORTING);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(getColor(R.color.chrome));
@@ -180,12 +186,24 @@ public final class MainActivity extends Activity {
         });
     }
 
+    /** Writes the current file before choosing a destination, so the editor is not needed for the result. */
     private void export() {
-        session.request("nvim_exec_lua", "return vim.fn.expand('%:t')", List.of()).whenComplete((name, error) -> {
+        String write = "vim.cmd.write(); return vim.api.nvim_buf_get_name(0)";
+        session.request("nvim_exec_lua", write, List.of()).whenComplete((path, error) -> {
+            if (error != null || !(path instanceof String file)) {
+                message("Export failed: " + (error == null ? "no file name" : EditorSession.rootMessage(error)));
+                return;
+            }
+            exporting = file;
+            String name = new File(exporting).getName();
+            int dot = name.lastIndexOf('.');
+            String extension = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+            String type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_TITLE, name instanceof String n && !n.isEmpty() ? n : "notes.txt");
+            // Providers append an extension for a type that the name's extension does not match.
+            intent.setType(type == null ? "application/octet-stream" : type);
+            intent.putExtra(Intent.EXTRA_TITLE, name);
             startActivityForResult(intent, EXPORT);
         });
     }
@@ -202,15 +220,21 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        String exported = exporting;
+        if (requestCode == EXPORT) exporting = null;
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (requestCode == OPEN) open(session.documents.importDocument(uri, data.getFlags()));
-        if (requestCode == EXPORT) {
-            session.request("nvim_exec_lua", "vim.cmd.write(); return vim.api.nvim_buf_get_name(0)", List.of())
-                    .thenCompose(path -> session.documents.export(new File((String) path), uri))
-                    .whenComplete((ignored, error) -> message(error == null ? "Exported a copy"
-                            : "Export failed: " + EditorSession.rootMessage(error)));
+        if (requestCode == EXPORT && exported != null) {
+            session.documents.export(new File(exported), uri).whenComplete((ignored, error) -> message(error == null
+                    ? "Exported a copy" : "Export failed: " + EditorSession.rootMessage(error)));
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString(EXPORTING, exporting);
     }
 
     /** Neovim's global state cannot be reinitialized in-process, so start a fresh app process. */

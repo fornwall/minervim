@@ -7,6 +7,7 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.text.InputType;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -278,9 +279,9 @@ public class NeovimViewTest {
                 view.toggleAlt();
                 assertTrue(connection.commitText("<", 1));
                 view.toggleCtrl();
-                // A composed letter becomes the modified key immediately, and the stale connection closes.
+                // A composed letter becomes the modified key immediately, and the replaced connection stops composing.
                 assertTrue(connection.setComposingText("d", 1));
-                assertFalse(connection.commitText("d", 1));
+                assertFalse(connection.setComposingText("d", 1));
                 connection = view.onCreateInputConnection(new EditorInfo());
                 view.toggleCtrl();
                 ((ViewGroup) view.getParent()).removeView(view);
@@ -310,7 +311,7 @@ public class NeovimViewTest {
         });
     }
 
-    @Test public void imeCompositionStaysLocalAndOldConnectionsCannotSend() {
+    @Test public void imeCompositionStaysLocalAndOnlyTheCurrentConnectionComposes() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -328,10 +329,14 @@ public class NeovimViewTest {
                 assertTrue(first.commitText("a<b", 1));
                 assertEquals(List.of("a<LT>b"), input.keys);
                 InputConnection second = view.onCreateInputConnection(new EditorInfo());
-                assertFalse(first.commitText("stale", 1));
+                // Text typed while the IME restarts still arrives; closed connections send nothing.
+                assertFalse(first.setComposingText("stale", 1));
+                assertTrue(first.commitText("late", 1));
+                first.closeConnection();
+                assertFalse(first.commitText("closed", 1));
                 assertTrue(second.setComposingText("文", 1));
                 assertTrue(second.finishComposingText());
-                assertEquals(List.of("a<LT>b", "文"), input.keys);
+                assertEquals(List.of("a<LT>b", "late", "文"), input.keys);
                 ((ViewGroup) view.getParent()).removeView(view);
                 assertFalse(second.commitText("detached", 1));
             });
@@ -634,6 +639,36 @@ public class NeovimViewTest {
             connection = view.onCreateInputConnection(new EditorInfo());
             assertTrue(connection.setComposingText("w", 1));
             assertEquals(List.of("hello", "<Esc>", "hi", "left press 0,1", "left release 0,1", "x", "<C-w>"), input.events);
+        });
+    }
+
+    private static List<?> mode(String name, int index) {
+        return List.of(List.of("mode_info_set", List.of(true, List.of(Map.of("name", "normal"), Map.of("name", "insert"),
+                Map.of("name", "cmdline_normal")))), List.of("mode_change", List.of(name, index)), List.of("flush", List.of()));
+    }
+
+    @Test public void imeComposesOnlyInTextEntryModes() {
+        attached((activity, view, input) -> {
+            EditorInfo info = new EditorInfo();
+            InputConnection normal = view.onCreateInputConnection(info);
+            assertEquals(InputType.TYPE_NULL, info.inputType);
+            assertTrue((info.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0);
+            view.handleRedraw(mode("normal", 0));
+            view.onCreateInputConnection(info = new EditorInfo());
+            assertEquals(InputType.TYPE_NULL, info.inputType);
+            // Entering Insert mode restarts the IME: the previous connection still commits but no longer composes.
+            view.handleRedraw(mode("insert", 1));
+            assertFalse(normal.setComposingText("x", 1));
+            assertTrue(normal.commitText("y", 1));
+            view.onCreateInputConnection(info = new EditorInfo());
+            assertEquals(InputType.TYPE_CLASS_TEXT, info.inputType & InputType.TYPE_MASK_CLASS);
+            view.handleRedraw(mode("cmdline_normal", 2));
+            view.onCreateInputConnection(info = new EditorInfo());
+            assertEquals(InputType.TYPE_CLASS_TEXT, info.inputType & InputType.TYPE_MASK_CLASS);
+            view.handleRedraw(mode("normal", 0));
+            view.onCreateInputConnection(info = new EditorInfo());
+            assertEquals(InputType.TYPE_NULL, info.inputType);
+            assertEquals(List.of("y"), input.keys);
         });
     }
 }

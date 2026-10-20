@@ -27,6 +27,7 @@ public final class NeovimGrid {
     private int cursorPercentage = 25;
     private int cursorAttribute;
     private int mode = -1;
+    private String modeName = "";
     private List<?> modes = List.of();
     private boolean busy;
     private int linespace;
@@ -95,6 +96,7 @@ public final class NeovimGrid {
                         }
                     }
                     case "mode_change" -> {
+                        modeName = args.get(0) instanceof String current ? current : "";
                         mode = integer(args, 1);
                         applyMode();
                     }
@@ -244,7 +246,7 @@ public final class NeovimGrid {
         highlightsShared = true;
         return new Frame(columns, rows, text.clone(), attributes.clone(), wrapped.clone(), highlights, foreground,
                 background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy,
-                linespace, guifontSize);
+                linespace, guifontSize, modeName);
     }
 
     /** The {@code :hN} size of the first 'guifont' entry, or 0. Font names are ignored. */
@@ -302,6 +304,8 @@ public final class NeovimGrid {
     public static final class Frame {
         public final int columns, rows, foreground, background, special, cursorRow, cursorColumn, cursorPercentage, cursorAttribute;
         public final String cursorShape;
+        /** The mode_change name, such as "normal", "insert" or "cmdline_normal"; empty before the first. */
+        public final String mode;
         public final boolean busy;
         /** UI options: 'linespace', and the 'guifont' size (0 when unset). */
         public final int linespace;
@@ -313,13 +317,14 @@ public final class NeovimGrid {
         private static final Highlight DEFAULT = new Highlight(Map.of());
         Frame(int columns, int rows, String[][] text, int[][] attributes, boolean[] wrapped, Highlight[] highlights,
                 int foreground, int background, int special, int cursorRow, int cursorColumn,
-                String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy, int linespace, float guifontSize) {
+                String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy, int linespace, float guifontSize,
+                String mode) {
             this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes; this.wrapped = wrapped;
             this.highlights = highlights; this.foreground = foreground; this.background = background;
             this.special = special; this.cursorRow = cursorRow; this.cursorColumn = cursorColumn;
             this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage;
             this.cursorAttribute = cursorAttribute; this.busy = busy;
-            this.linespace = linespace; this.guifontSize = guifontSize;
+            this.linespace = linespace; this.guifontSize = guifontSize; this.mode = mode;
         }
         public String text(int row, int column) { return text[row][column]; }
         public int attribute(int row, int column) { return attributes[row][column]; }

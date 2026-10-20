@@ -51,7 +51,9 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   multi-line text it commits (clipboard suggestions, dictation) is pasted
   rather than typed, so mappings and autoindent do not apply to it. Text still
   being composed is sent before another key, a tap, a sticky modifier, or focus
-  loss.
+  loss. Outside Insert, Replace and command-line modes the soft keyboard is asked
+  for plain keys, so a composing keyboard does not hold back commands such as
+  `dd`.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to disable the writes. On the next start the

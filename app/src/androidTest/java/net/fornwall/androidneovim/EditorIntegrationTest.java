@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.os.Process;
+import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -150,7 +151,7 @@ public final class EditorIntegrationTest {
     }
 
     @Test
-    public void imeEnterIsReturnAndMultiLineCommitsArePasted() throws Exception {
+    public void imeFollowsModesAndSendsEnterAndMultiLineText() throws Exception {
         var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
@@ -158,8 +159,11 @@ public final class EditorIntegrationTest {
             // Autoindent and an insert-mode mapping would mangle multi-line text typed as keys.
             request(session, "nvim_exec_lua", "vim.cmd('enew!'); vim.bo.autoindent = true; "
                     + "vim.keymap.set('i', 'jk', '<Esc>')", List.of());
+            // Normal-mode keys are commands, so the keyboard is asked for plain keys instead of composed text.
+            await(() -> inputClass(activity) == InputType.TYPE_NULL);
             activity.onActivity(a -> a.editorView().sendKey("i"));
             await(() -> "i".equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("mode")));
+            await(() -> inputClass(activity) == InputType.TYPE_CLASS_TEXT);
             activity.onActivity(a -> {
                 var input = a.editorView().onCreateInputConnection(new EditorInfo());
                 assertTrue(input.commitText("  ab", 1));
@@ -169,6 +173,12 @@ public final class EditorIntegrationTest {
             await(() -> List.of("  ab", "  jk", "  x", "").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
             assertEquals("i", ((Map<?, ?>) request(session, "nvim_get_mode")).get("mode"));
         }
+    }
+
+    private static int inputClass(ActivityScenario<MainActivity> activity) {
+        EditorInfo info = new EditorInfo();
+        activity.onActivity(a -> a.editorView().onCreateInputConnection(info));
+        return info.inputType & InputType.TYPE_MASK_CLASS;
     }
 
     private static void awaitUi(EditorSession session) throws Exception {

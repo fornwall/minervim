@@ -84,6 +84,7 @@ public final class NeovimView extends View {
     private int columns = 80;
     private int rows = 24;
     private int connectionGeneration;
+    private boolean textEntry;
     private int pendingAccent;
     private String composition = "";
     private String pressedButton;
@@ -222,6 +223,7 @@ public final class NeovimView extends View {
             guifontSize = frame.guifontSize;
             setFontSize(guifontSize > 0 ? guifontSize : savedFontSize());
         }
+        updateInputMode();
         postInvalidateOnAnimation();
         if (!contentChangePending && accessibility != null && accessibility.isEnabled()) {
             contentChangePending = true;
@@ -505,24 +507,47 @@ public final class NeovimView extends View {
 
     @Override public boolean onCheckIsTextEditor() { return true; }
 
+    /** Insert, Replace and command-line modes edit text; in other modes keys are commands. */
+    static boolean textEntry(String mode) {
+        // Neovim also reports "replace" while the cursor is behind a floating window.
+        return switch (mode) {
+            case "insert", "replace", "showmatch", "cmdline_normal", "cmdline_insert", "cmdline_replace" -> true;
+            default -> false;
+        };
+    }
+
+    /** Restarts the IME when the flushed mode starts or stops editing text. */
+    private void updateInputMode() {
+        boolean text = textEntry(grid.frame().mode);
+        if (text == textEntry) return;
+        textEntry = text;
+        resetIme();
+    }
+
     @Override public InputConnection onCreateInputConnection(EditorInfo info) {
-        info.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
-        info.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_ACTION_NONE;
+        // Outside text entry, TYPE_NULL asks for plain keys, so a composing keyboard does not hold back commands.
+        info.inputType = textEntry ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS : InputType.TYPE_NULL;
+        info.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_ACTION_NONE
+                | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
         info.initialSelStart = info.initialSelEnd = 0;
         composition = "";
         final int generation = ++connectionGeneration;
         return new BaseInputConnection(this, false) {
             private boolean closed;
-            private boolean active() { return !closed && generation == connectionGeneration && isAttachedToWindow(); }
+            // A connection replaced by restartInput still delivers text and keys typed during the restart, but
+            // only the current one composes. Closed connections and a detached view deliver nothing.
+            private boolean active() { return !closed && isAttachedToWindow(); }
+            private boolean current() { return active() && generation == connectionGeneration; }
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
-                composition = "";
+                if (generation == connectionGeneration) composition = "";
                 if (text != null && text.length() > 0) commitIme(text.toString());
                 invalidate();
                 return true;
             }
             @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
-                if (!active()) return false;
+                if (!current()) return false;
                 // Soft keyboards often compose single letters; a sticky modifier makes one a key now.
                 if ((stickyCtrl || stickyAlt) && composition.isEmpty() && text != null && text.length() > 0
                         && Character.codePointCount(text, 0, text.length()) == 1) {
@@ -535,12 +560,12 @@ public final class NeovimView extends View {
                 return true;
             }
             @Override public boolean finishComposingText() {
-                if (!active()) return false;
+                if (!current()) return false;
                 return commitText(composition, 1);
             }
             @Override public boolean deleteSurroundingText(int before, int after) {
                 if (!active()) return false;
-                if (!composition.isEmpty()) {
+                if (current() && !composition.isEmpty()) {
                     int count = composition.codePointCount(0, composition.length());
                     composition = composition.substring(0, composition.offsetByCodePoints(0, Math.max(0, count - Math.max(0, before))));
                     invalidate();
@@ -551,6 +576,7 @@ public final class NeovimView extends View {
             }
             @Override public boolean deleteSurroundingTextInCodePoints(int before, int after) { return deleteSurroundingText(before, after); }
             @Override public CharSequence getTextBeforeCursor(int length, int flags) {
+                if (!current()) return "";
                 return composition.substring(Math.max(0, composition.length() - Math.max(0, length)));
             }
             @Override public CharSequence getTextAfterCursor(int length, int flags) { return ""; }

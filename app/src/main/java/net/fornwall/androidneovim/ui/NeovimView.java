@@ -32,6 +32,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.OverScroller;
 import android.widget.Toast;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.List;
 
 /** A direct Neovim grid UI; there is no terminal emulator or escape-sequence layer. */
@@ -91,6 +92,7 @@ public final class NeovimView extends View {
     private int connectionGeneration;
     private boolean textEntry;
     private int pendingAccent;
+    private final BitSet handledKeys = new BitSet();
     private String composition = "";
     private String pressedButton;
     private int pressedRow;
@@ -618,6 +620,11 @@ public final class NeovimView extends View {
                 input("<CR>");
                 return true;
             }
+            @Override public boolean performContextMenuAction(int id) {
+                if (!active() || (id != android.R.id.paste && id != android.R.id.pasteAsPlainText)) return false;
+                pasteClipboard();
+                return true;
+            }
             @Override public void closeConnection() {
                 closed = true;
                 if (generation == connectionGeneration) { composition = ""; invalidate(); }
@@ -656,6 +663,19 @@ public final class NeovimView extends View {
     }
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (!keyDown(keyCode, event)) return super.onKeyDown(keyCode, event);
+        handledKeys.set(keyCode);
+        return true;
+    }
+
+    /** Only key-ups of handled key-downs are consumed; others, such as Back, reach the framework. */
+    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (!handledKeys.get(keyCode)) return super.onKeyUp(keyCode, event);
+        handledKeys.clear(keyCode);
+        return true;
+    }
+
+    private boolean keyDown(int keyCode, KeyEvent event) {
         if (event.isCtrlPressed() && event.isShiftPressed() && keyCode == KeyEvent.KEYCODE_V) {
             pasteClipboard();
             return true;
@@ -677,7 +697,7 @@ public final class NeovimView extends View {
             pendingAccent = unicode & KeyCharacterMap.COMBINING_ACCENT_MASK;
             return true;
         }
-        if (unicode == 0) return super.onKeyDown(keyCode, event);
+        if (unicode == 0) return false;
         commitComposition();
         if (pendingAccent != 0) {
             int combined = KeyCharacterMap.getDeadChar(pendingAccent, unicode);
@@ -688,11 +708,6 @@ public final class NeovimView extends View {
         if (modified) {
             input(KeyNotation.modifiedKey(unicode, event.getUnicodeChar(meta & ~KeyEvent.META_SHIFT_MASK), event.getMetaState()));
         } else input(KeyNotation.literal(new String(Character.toChars(unicode))));
-        return true;
-    }
-
-    @Override public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) return super.onKeyUp(keyCode, event);
         return true;
     }
 
@@ -899,6 +914,7 @@ public final class NeovimView extends View {
         endTouch();
         clearModifiers();
         pendingAccent = 0;
+        handledKeys.clear();
         if (!composition.isEmpty() && listener != null) listener.input(KeyNotation.literal(composition));
         composition = "";
         connectionGeneration++;

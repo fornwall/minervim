@@ -2,11 +2,14 @@ package net.fornwall.androidneovim.ui;
 
 import static org.junit.Assert.*;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.view.InputDevice;
 import android.view.KeyEvent;
@@ -62,6 +65,10 @@ public class NeovimViewTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity = instrumentation.startActivitySync(intent);
         try {
+            // Reading the clipboard needs window focus.
+            for (long deadline = SystemClock.uptimeMillis() + 5000; !activity.hasWindowFocus() && SystemClock.uptimeMillis() < deadline; ) {
+                SystemClock.sleep(20);
+            }
             instrumentation.runOnMainSync(() -> {
                 NeovimView view = new NeovimView(activity);
                 InputLog input = new InputLog();
@@ -795,6 +802,33 @@ public class NeovimViewTest {
             view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 700, 1, source, pinch));
             assertTrue(view.fontSize() > before);
             assertTrue(input.mouse.isEmpty());
+        });
+    }
+
+    @Test public void imePasteActionPastesTheClipboard() {
+        attached((activity, view, input) -> {
+            activity.getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("test", "one\ntwo"));
+            InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.performContextMenuAction(android.R.id.paste));
+            assertTrue(connection.performContextMenuAction(android.R.id.pasteAsPlainText));
+            assertFalse(connection.performContextMenuAction(android.R.id.selectAll));
+            assertEquals(List.of("one\ntwo", "one\ntwo"), input.pastes);
+        });
+    }
+
+    @Test public void onlyKeyUpsOfHandledKeyDownsAreConsumed() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            view.setListener(new InputLog());
+            KeyEvent up = new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_A);
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_A, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A)));
+            assertTrue(view.onKeyUp(KeyEvent.KEYCODE_A, up));
+            assertFalse(view.onKeyUp(KeyEvent.KEYCODE_A, up));
+            for (int key : new int[] {KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE}) {
+                assertFalse(view.onKeyDown(key, new KeyEvent(KeyEvent.ACTION_DOWN, key)));
+                assertFalse(view.onKeyUp(key, new KeyEvent(KeyEvent.ACTION_UP, key)));
+            }
         });
     }
 }

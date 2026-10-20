@@ -46,7 +46,10 @@ end
 
 -- LuaJIT's os.exit() would end Neovim's thread without its teardown. Quit through Neovim instead.
 os.exit = function(code)
-  local status = (code == nil or code == true) and 0 or code == false and 1 or math.floor(tonumber(code) or 1)
+  if code == nil or code == true then code = 0 elseif code == false then code = 1 end
+  -- Like exit(), keep the low 8 bits, so -1 is 255; :cquit rejects a negative count.
+  local n = tonumber(code)
+  local status = (n and n == n and math.abs(n) ~= math.huge) and math.floor(n) % 256 or 1
   vim.schedule(function() vim.cmd(status == 0 and 'qall!' or ('cquit ' .. status)) end)
 end
 

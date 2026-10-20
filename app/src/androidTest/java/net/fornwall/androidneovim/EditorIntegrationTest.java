@@ -283,6 +283,17 @@ public final class EditorIntegrationTest {
     }
 
     @Test
+    public void luaOsExitKeepsTheLowEightBitsOfItsStatus() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_exec_lua", "vim.schedule(function() os.exit(-1) end)", List.of());
+            await(() -> onMain(session::stopped) && onMain(session::status).contains("exited (255)"));
+        }
+    }
+
+    @Test
     public void deepVimscriptRecursionFitsTheEditorStack() throws Exception {
         int process = Process.myPid();
         var context = InstrumentationRegistry.getInstrumentation().getTargetContext();

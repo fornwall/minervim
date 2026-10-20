@@ -85,10 +85,12 @@ Latin, Greek and Cyrillic) in text runs scaled to the cell grid. Other clusters,
 as CJK and symbols from fallback fonts, are drawn per cell: centred, or narrowed to
 fit when wider than their cells. `linespace` adds space between rows in dp, and a
 `guifont` size such as `:set guifont=:h16` sets the font size in sp until it is
-cleared; font names are ignored. Cross-cell ligatures, cached row rendering, rich
-accessibility navigation, and full IME surrounding-text behavior are future work.
-Single, double, dotted and dashed underlines and strikethrough follow the font's
-line metrics and use the text color unless `guisp` sets one; undercurl is a wave.
+cleared; font names are ignored. Single, double, dotted and dashed underlines and
+strikethrough follow the font's line metrics and use the text color unless `guisp`
+sets one; undercurl is a wave. Overline is drawn, standout is drawn as reverse
+video, and the block cursor is hollow while the editor view lacks focus.
+Cross-cell ligatures, cached row rendering, rich accessibility navigation, and full
+IME surrounding-text behavior are future work.
 
 ## Architecture
 

@@ -545,4 +545,33 @@ public class NeovimViewTest {
             instrumentation.runOnMainSync(activity::finish);
         }
     }
+
+    @Test public void blockCursorIsHollowWithoutFocus() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = instrumentation.startActivitySync(intent);
+        try {
+            instrumentation.runOnMainSync(() -> {
+                NeovimView view = new NeovimView(activity);
+                activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));
+                view.handleRedraw(List.of(List.of("default_colors_set", List.of(0xffffff, 0, 0xff0000, 0, 0)),
+                        List.of("grid_resize", List.of(1, 3, 1)), List.of("grid_cursor_goto", List.of(1, 0, 1)),
+                        List.of("flush", List.of())));
+                int w = (int) view.cellWidth(), h = (int) view.cellHeight();
+                view.layout(0, 0, 3 * w, h);
+                for (boolean focused : new boolean[] {false, true}) {
+                    if (focused) assertTrue(view.requestFocus());
+                    else view.clearFocus();
+                    assertEquals(focused, view.isFocused());
+                    Bitmap bitmap = Bitmap.createBitmap(3 * w, h, Bitmap.Config.ARGB_8888);
+                    view.draw(new Canvas(bitmap));
+                    assertEquals(art(bitmap), focused, ink(bitmap, w + w / 2, h / 2));
+                    assertTrue(art(bitmap), ink(bitmap, w + w / 2, 0) && ink(bitmap, w + 1, h / 2));
+                }
+                ((ViewGroup) view.getParent()).removeView(view);
+            });
+        } finally {
+            instrumentation.runOnMainSync(activity::finish);
+        }
+    }
 }

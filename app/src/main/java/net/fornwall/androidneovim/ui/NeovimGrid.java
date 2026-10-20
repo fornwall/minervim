@@ -280,11 +280,13 @@ public final class NeovimGrid {
         final boolean underdashed;
         final boolean undercurl;
         final boolean strikethrough;
+        final boolean overline;
         Highlight(Map<?, ?> style) {
             foreground = mapInteger(style, "foreground", -1);
             background = mapInteger(style, "background", -1);
             special = mapInteger(style, "special", -1);
-            reverse = Boolean.TRUE.equals(style.get("reverse"));
+            // GUIs draw standout as reverse video.
+            reverse = Boolean.TRUE.equals(style.get("reverse")) || Boolean.TRUE.equals(style.get("standout"));
             bold = Boolean.TRUE.equals(style.get("bold"));
             italic = Boolean.TRUE.equals(style.get("italic"));
             undercurl = Boolean.TRUE.equals(style.get("undercurl"));
@@ -293,6 +295,7 @@ public final class NeovimGrid {
             underdashed = Boolean.TRUE.equals(style.get("underdashed"));
             underline = Boolean.TRUE.equals(style.get("underline")) || underdouble || underdotted || underdashed;
             strikethrough = Boolean.TRUE.equals(style.get("strikethrough"));
+            overline = Boolean.TRUE.equals(style.get("overline"));
         }
     }
 

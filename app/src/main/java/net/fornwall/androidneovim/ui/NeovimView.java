@@ -62,7 +62,7 @@ public final class NeovimView extends View {
     private final String[][] advanceKeys = new String[4][1 << ADVANCE_BITS];
     private final float[][] advanceValues = new float[4][1 << ADVANCE_BITS];
     private final Paint fill = new Paint();
-    private final Paint curl = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path curlPath = new Path();
     private char[] run = new char[256];
     private final AccessibilityManager accessibility = getContext().getSystemService(AccessibilityManager.class);
@@ -116,8 +116,8 @@ public final class NeovimView extends View {
             paint.setFontFeatureSettings("'kern' 0, 'liga' 0, 'clig' 0, 'calt' 0");
             textPaints[style] = paint;
         }
-        curl.setStyle(Paint.Style.STROKE);
-        curl.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
         fontSize = savedFontSize();
         applyFontSize();
         ViewConfiguration configuration = ViewConfiguration.get(context);
@@ -171,7 +171,7 @@ public final class NeovimView extends View {
         cellHeight = textHeight + extra;
         baseline = textHeight - metrics.descent + extra / 2;
         curlAmplitude = Math.max(1, textHeight / 16f);
-        curlMiddle = Math.min(cellHeight, textHeight + extra / 2) - curlAmplitude - curl.getStrokeWidth() / 2;
+        curlMiddle = Math.min(cellHeight, textHeight + extra / 2) - curlAmplitude - stroke.getStrokeWidth() / 2;
         // Decorations follow the font's metrics, on whole pixels and inside the cell.
         Paint regular = textPaints[0];
         underlineThickness = Math.min(cellHeight, Math.max(1, Math.round(regular.getUnderlineThickness())));
@@ -285,14 +285,21 @@ public final class NeovimView extends View {
                 case "vertical" -> canvas.drawRect(x, y, x + Math.max(1, cellWidth * frame.cursorPercentage / 100), y + cellHeight, fill);
                 case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, right, y + cellHeight, fill);
                 default -> {
-                    canvas.drawRect(x, y, right, y + cellHeight, fill);
-                    int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
-                    textPaints[style].setColor(frame.cursorForeground());
-                    // Only the block shows the cursor colors; overhanging ink keeps the cell's own color.
-                    int clipped = canvas.save();
-                    canvas.clipRect(x, y, right, y + cellHeight);
-                    drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, style);
-                    canvas.restoreToCount(clipped);
+                    if (isFocused()) {
+                        canvas.drawRect(x, y, right, y + cellHeight, fill);
+                        int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
+                        textPaints[style].setColor(frame.cursorForeground());
+                        // Only the block shows the cursor colors; overhanging ink keeps the cell's own color.
+                        int clipped = canvas.save();
+                        canvas.clipRect(x, y, right, y + cellHeight);
+                        drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, style);
+                        canvas.restoreToCount(clipped);
+                    } else {
+                        // Keys do not reach an unfocused view, so its block cursor is hollow, as in terminals.
+                        float inset = stroke.getStrokeWidth() / 2;
+                        stroke.setColor(frame.cursorBackground());
+                        canvas.drawRect(x + inset, y + inset, right - inset, y + cellHeight - inset, stroke);
+                    }
                 }
             }
             if (!composition.isEmpty()) {
@@ -353,10 +360,9 @@ public final class NeovimView extends View {
                 drawCell(canvas, frame, row, column, y, style);
             }
             drawRun(canvas, runStart, trimmed, y, paint);
-            if (highlight.strikethrough) {
-                fill.setColor(frame.decoration(highlight));
-                canvas.drawRect(start * cellWidth, y + strikeTop, end * cellWidth, y + strikeTop + strikeThickness, fill);
-            }
+            if (highlight.strikethrough || highlight.overline) fill.setColor(frame.decoration(highlight));
+            if (highlight.strikethrough) canvas.drawRect(start * cellWidth, y + strikeTop, end * cellWidth, y + strikeTop + strikeThickness, fill);
+            if (highlight.overline) canvas.drawRect(start * cellWidth, y, end * cellWidth, y + underlineThickness, fill);
         }
     }
 
@@ -364,7 +370,7 @@ public final class NeovimView extends View {
         if (length > 0) canvas.drawTextRun(run, 0, length, 0, length, column * cellWidth, y + baseline, false, paint);
     }
 
-    /** Underlines precede the span's glyphs, so descenders stay visible; strikethrough follows them. */
+    /** Underlines precede the span's glyphs, so descenders stay visible; strikethrough and overline follow them. */
     private void drawUnderline(Canvas canvas, NeovimGrid.Frame frame, NeovimGrid.Highlight highlight, int start, int end, float y) {
         float left = start * cellWidth, right = end * cellWidth, top = y + underlineTop, thickness = underlineThickness;
         if (highlight.underline) {
@@ -390,8 +396,8 @@ public final class NeovimView extends View {
             for (float x = left, sign = -1; x < right - 0.5f; x += half, sign = -sign) {
                 curlPath.quadTo(x + half / 2, middle + 2 * sign * amplitude, x + half, middle);
             }
-            curl.setColor(frame.special(highlight));
-            canvas.drawPath(curlPath, curl);
+            stroke.setColor(frame.special(highlight));
+            canvas.drawPath(curlPath, stroke);
         }
     }
 

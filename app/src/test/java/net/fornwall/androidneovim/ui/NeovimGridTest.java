@@ -145,6 +145,9 @@ public class NeovimGridTest {
         assertEquals(0xff445566, frame.foreground(frame.highlight(0, 0)));
         assertEquals(0xff112233, frame.background(frame.highlight(0, 0)));
         assertTrue(frame.highlight(0, 0).bold);
+        grid.handleRedraw(List.of(event("hl_attr_define", 2, Map.of("standout", true, "overline", true), Map.of(), List.of()), flush()));
+        assertEquals(0xff445566, grid.frame().foreground(grid.frame().highlight(2)));
+        assertTrue(grid.frame().highlight(2).overline);
     }
 
     @Test public void decorationsUseTextColorUnlessSpecialIsSet() {

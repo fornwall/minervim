@@ -79,7 +79,9 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to keep buffers unwritten; ShaDa is still
-  saved. On the next start the most recent file in app storage reopens. Persistent undo is on by default.
+  saved. Neovim defers this save while it waits at a prompt, such as "Press
+  ENTER" or a `confirm()` dialog, or for the rest of a mapping. On the next start
+  the most recent file in app storage reopens. Persistent undo is on by default.
 - Neovim's `background` follows the system dark/light theme, also when it changes
   while the editor is open, unless `vim.g.android_follow_system_theme = false`.
 - Neovim starts normally: `:e $MYVIMRC` edits
@@ -97,10 +99,15 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   `:TSInstall` needs a compiler and subprocesses.
 
 This is an embedding prototype. `:qa` stops the editor thread without exiting
-Android, and Lua's `os.exit()` quits the same way. Neovim's global state is not
-reinitialized in-process, so **Restart** then starts a fresh app process. There
-is no foreground service or background-survival guarantee. Edits made since the
-last background save are lost if Android ends the process; swap files are disabled.
+Android, and Lua's `os.exit()` quits the same way, except while the user's own
+configuration runs, before the app replaces it: there it ends the editor thread
+without Neovim's teardown. Neovim's global state is not reinitialized in-process,
+so **Restart** then starts a fresh app process. There is no foreground service or
+background-survival guarantee. Edits made since the last background save are lost
+if Android ends the process, also while Neovim still defers that save at a prompt
+or pending key; swap files are disabled. Temporary files and `stdpath('cache')`
+live in Android's cache directory, which Android may clear, so an `undodir` or
+`backupdir` placed under `stdpath('cache')` can be lost.
 
 Ordinary subprocess launch paths are disabled, including shell commands, jobs,
 and terminal jobs. External language servers and process-based plugin providers
@@ -157,19 +164,24 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
-JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
-lifecycle, including requests from Neovim, command ordering, resize coalescing
-and chunked paste, document change detection, and tree deletion.
+JVM tests cover grid update semantics, key notation, the glyph advance cache,
+MessagePack limits and RPC lifecycle, including requests from Neovim, command
+ordering, resize coalescing and chunked paste, document change detection, and
+tree deletion.
 Device tests exercise the real JNI core, Unicode IME input (including input
-larger than Neovim's queue), saving, visible redraws, Activity recreation,
-same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
-parsers and their ftplugins, clipboard
-round-trips (including more lines than one RPC message may hold), CRLF paste,
-requests at a "Press ENTER" prompt, deep Vimscript recursion, background saves,
-window focus events, IME line breaks and modes, document write-back through a
-test provider, setup errors, runtime updates, and editor shutdown, including
-Lua's `os.exit()`. UI tests also cover hardware key notation, sticky modifiers,
-IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
+larger than Neovim's queue), saving, visible redraws, Activity recreation and
+focus at launch, same-process execution, rejected subprocesses, ART's blocked
+signals (a write to a closed socket), the cache directory and the cleanup of
+temporary directories, client info, runtime plugins and updates, Tree-sitter
+parsers and their ftplugins, clipboard round-trips (including more lines than
+one RPC message may hold, and NUL), CRLF paste, requests at a "Press ENTER"
+prompt, deep Vimscript recursion, background saves, window focus events, IME
+line breaks and modes, document write-back through a test provider, opening and
+reopening files, export, gx and `:Open`, Back, setup errors, and editor
+shutdown, including Lua's `os.exit()`. UI tests also cover hardware key
+notation, sticky modifiers, IME lifecycle and deletions, mouse modifiers, touch
+and touchpad gestures, pinch, fallback glyphs, decorations, `linespace` and
+`guifont`, first frames in the system theme, the hollow cursor, and
 accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is

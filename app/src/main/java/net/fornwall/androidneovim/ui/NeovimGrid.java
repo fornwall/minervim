@@ -14,6 +14,8 @@ public final class NeovimGrid {
     private int[][] attributes = {{0}};
     // Published frames share row arrays; a shared row is copied before its first change (copy on write).
     private boolean[] rowShared = {false};
+    // Rows whose text continues on the next row, from grid_line's wrap hint.
+    private boolean[] wrapped = {false};
     private Highlight[] highlights = new Highlight[64];
     private boolean highlightsShared;
     private int foreground;
@@ -138,6 +140,7 @@ public final class NeovimGrid {
         text = nextText;
         attributes = nextAttributes;
         rowShared = new boolean[height];
+        wrapped = Arrays.copyOf(wrapped, height);
     }
 
     private void clear() {
@@ -158,6 +161,7 @@ public final class NeovimGrid {
             rowShared[row] = false;
         } else Arrays.fill(attributes[row], 0);
         Arrays.fill(text[row], " ");
+        wrapped[row] = false;
     }
 
     private void line(List<?> args) {
@@ -179,6 +183,8 @@ public final class NeovimGrid {
             }
             if (column == columns) break;
         }
+        // Neovim sends the hint with the part of a line that covers the last column.
+        if (column == columns) wrapped[row] = args.size() > 4 && Boolean.TRUE.equals(args.get(4));
     }
 
     private void scroll(List<?> args) {
@@ -221,12 +227,14 @@ public final class NeovimGrid {
         String[][] movedText = Arrays.copyOfRange(text, top, bottom);
         int[][] movedAttributes = Arrays.copyOfRange(attributes, top, bottom);
         boolean[] movedShared = Arrays.copyOfRange(rowShared, top, bottom);
+        boolean[] movedWrapped = Arrays.copyOfRange(wrapped, top, bottom);
         for (int i = 0; i < count; i++) {
             // Rows scrolled out of the region are reused, cleared, for the rows scrolled in.
             int source = Math.floorMod((long) i + offset, count);
             text[top + i] = movedText[source];
             attributes[top + i] = movedAttributes[source];
             rowShared[top + i] = movedShared[source];
+            wrapped[top + i] = movedWrapped[source];
             if ((long) i + offset < 0 || (long) i + offset >= count) blank(top + i);
         }
     }
@@ -234,7 +242,7 @@ public final class NeovimGrid {
     private Frame snapshot() {
         Arrays.fill(rowShared, true);
         highlightsShared = true;
-        return new Frame(columns, rows, text.clone(), attributes.clone(), highlights, foreground,
+        return new Frame(columns, rows, text.clone(), attributes.clone(), wrapped.clone(), highlights, foreground,
                 background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy,
                 linespace, guifontSize);
     }
@@ -297,12 +305,13 @@ public final class NeovimGrid {
         public final float guifontSize;
         private final String[][] text;
         private final int[][] attributes;
+        private final boolean[] wrapped;
         private final Highlight[] highlights;
         private static final Highlight DEFAULT = new Highlight(Map.of());
-        Frame(int columns, int rows, String[][] text, int[][] attributes, Highlight[] highlights,
+        Frame(int columns, int rows, String[][] text, int[][] attributes, boolean[] wrapped, Highlight[] highlights,
                 int foreground, int background, int special, int cursorRow, int cursorColumn,
                 String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy, int linespace, float guifontSize) {
-            this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes;
+            this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes; this.wrapped = wrapped;
             this.highlights = highlights; this.foreground = foreground; this.background = background;
             this.special = special; this.cursorRow = cursorRow; this.cursorColumn = cursorColumn;
             this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage;
@@ -311,6 +320,8 @@ public final class NeovimGrid {
         }
         public String text(int row, int column) { return text[row][column]; }
         public int attribute(int row, int column) { return attributes[row][column]; }
+        /** Whether the row's text continues on the next row (a wrapped line). */
+        public boolean wrapped(int row) { return wrapped[row]; }
         /** Whether row and other's otherRow use the same storage: frames copy only changed rows. */
         boolean sharesRow(int row, Frame other, int otherRow) {
             return text[row] == other.text[otherRow] && attributes[row] == other.attributes[otherRow];

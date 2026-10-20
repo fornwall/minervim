@@ -22,6 +22,8 @@ import android.view.ScaleGestureDetector;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
@@ -47,6 +49,8 @@ public final class NeovimView extends View {
     // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     private static final int ADVANCE_BITS = 9;
+    // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
+    private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
     // The system theme picks Neovim's 'background', so frames before its colors arrive match it.
     private final NeovimGrid grid = new NeovimGrid((getResources().getConfiguration().uiMode
             & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_NO);
@@ -61,6 +65,9 @@ public final class NeovimView extends View {
     private final Paint curl = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path curlPath = new Path();
     private char[] run = new char[256];
+    private final AccessibilityManager accessibility = getContext().getSystemService(AccessibilityManager.class);
+    private final Runnable contentChanged = this::sendContentChanged;
+    private boolean contentChangePending;
     private float fontSize;
     private float pinchScale = 1;
     private float cellWidth;
@@ -216,6 +223,19 @@ public final class NeovimView extends View {
             setFontSize(guifontSize > 0 ? guifontSize : savedFontSize());
         }
         postInvalidateOnAnimation();
+        if (!contentChangePending && accessibility != null && accessibility.isEnabled()) {
+            contentChangePending = true;
+            postDelayed(contentChanged, CONTENT_CHANGE_INTERVAL_MS);
+        }
+    }
+
+    /** Tells accessibility services, at most once per interval, that the screen text changed. */
+    private void sendContentChanged() {
+        contentChangePending = false;
+        if (accessibility == null || !accessibility.isEnabled()) return;
+        AccessibilityEvent event = new AccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+        event.setContentChangeTypes(AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT);
+        sendAccessibilityEventUnchecked(event);
     }
 
     @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) { updateGridSize(); }
@@ -473,18 +493,19 @@ public final class NeovimView extends View {
         info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_PASTE);
     }
 
-    /** Text from the last complete frame, bounded for platform accessibility consumers. */
+    /** Text from the last complete frame, with wrapped rows joined, bounded for platform accessibility consumers. */
     public String screenText() {
         NeovimGrid.Frame frame = grid.frame();
         StringBuilder text = new StringBuilder();
+        boolean continued = false;
         for (int row = 0; row < frame.rows && text.length() < 32768; row++) {
             int end = frame.columns;
-            while (end > 0 && frame.text(row, end - 1).isBlank()) end--;
-            if (end == 0) continue;
-            if (text.length() > 0) text.append('\n');
+            if (!frame.wrapped(row)) while (end > 0 && frame.text(row, end - 1).isBlank()) end--;
+            if (end > 0 && !continued && text.length() > 0) text.append('\n');
             for (int column = 0; column < end && text.length() < 32768; column++) {
                 text.append(frame.text(row, column));
             }
+            continued = frame.wrapped(row);
         }
         return text.toString();
     }

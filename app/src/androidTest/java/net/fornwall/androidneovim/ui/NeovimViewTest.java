@@ -11,13 +11,17 @@ import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import net.fornwall.androidneovim.MainActivity;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -411,7 +415,7 @@ public class NeovimViewTest {
     }
 
     private static List<?> highlight(int id, String attribute) {
-        return List.of("hl_attr_define", List.of(id, java.util.Map.of(attribute, true), java.util.Map.of(), List.of()));
+        return List.of("hl_attr_define", List.of(id, Map.of(attribute, true), Map.of(), List.of()));
     }
 
     @Test public void decorationsUseFontMetricsAndTheTextColor() {
@@ -482,5 +486,63 @@ public class NeovimViewTest {
             assertTrue(view.fontSize() > before);
             assertEquals(List.of(view.columns() + "x" + view.rows()), log.sizes);
         });
+    }
+
+    @Test public void screenTextJoinsWrappedRows() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 4, 4)),
+                    List.of("grid_line", List.of(1, 0, 0, List.of(List.of("a", 0), List.of("b"), List.of(" ", 0, 2)), true)),
+                    List.of("grid_line", List.of(1, 1, 0, List.of(List.of("c", 0, 4)), true)),
+                    List.of("grid_line", List.of(1, 2, 0, List.of(List.of("d", 0), List.of(" ", 0, 3)), false)),
+                    List.of("grid_line", List.of(1, 3, 0, List.of(List.of("e", 0), List.of(" ", 0, 3)), false)),
+                    List.of("flush", List.of())));
+            assertEquals("ab  ccccd\ne", view.screenText());
+            view.handleRedraw(List.of(List.of("grid_line", List.of(1, 0, 3, List.of(List.of("!", 0)), false)),
+                    List.of("flush", List.of())));
+            assertEquals("ab !\nccccd\ne", view.screenText());
+        });
+    }
+
+    @Test public void flushesNotifyAccessibilityAtMostOncePerInterval() throws Exception {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        // A UiAutomation connection enables accessibility for the app.
+        var automation = instrumentation.getUiAutomation();
+        var manager = instrumentation.getTargetContext().getSystemService(AccessibilityManager.class);
+        for (int i = 0; i < 100 && !manager.isEnabled(); i++) Thread.sleep(50);
+        assertTrue(manager.isEnabled());
+        Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = instrumentation.startActivitySync(intent);
+        // Each batch of flushes within one interval must send exactly one event.
+        List<Integer> events = Collections.synchronizedList(new ArrayList<>());
+        int[] batch = {0};
+        try {
+            NeovimView[] holder = new NeovimView[1];
+            instrumentation.runOnMainSync(() -> {
+                holder[0] = new NeovimView(activity);
+                holder[0].setContentDescription("rendering test");
+                activity.addContentView(holder[0], new ViewGroup.LayoutParams(200, 200));
+            });
+            instrumentation.waitForIdleSync();
+            automation.setOnAccessibilityEventListener(event -> {
+                if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                        && event.getContentChangeTypes() == AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT
+                        && "rendering test".equals(String.valueOf(event.getContentDescription()))) events.add(batch[0]);
+            });
+            for (batch[0] = 1; batch[0] <= 2; batch[0]++) {
+                instrumentation.runOnMainSync(() -> {
+                    for (int i = 0; i < 5; i++) {
+                        holder[0].handleRedraw(List.of(List.of("grid_line", List.of(1, 0, 0, List.of(List.of("x" + i, 0)), false)),
+                                List.of("flush", List.of())));
+                    }
+                });
+                Thread.sleep(600);
+                assertEquals(batch[0] == 1 ? List.of(1) : List.of(1, 2), events);
+            }
+        } finally {
+            automation.setOnAccessibilityEventListener(null);
+            instrumentation.runOnMainSync(activity::finish);
+        }
     }
 }

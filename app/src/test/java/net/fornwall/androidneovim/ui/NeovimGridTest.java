@@ -12,6 +12,9 @@ public class NeovimGridTest {
     private static List<?> line(int row, int column, Object... cells) {
         return event("grid_line", 1, row, column, List.of(cells), false);
     }
+    private static List<?> wrappedLine(int row, int column, Object... cells) {
+        return event("grid_line", 1, row, column, List.of(cells), true);
+    }
     private static List<?> cell(String text, int attribute) { return List.of(text, attribute); }
 
     @Test public void flushIsTransactionBoundaryAcrossNotifications() {
@@ -89,6 +92,26 @@ public class NeovimGridTest {
         assertEquals(" ", grid.frame().text(0, 0));
         assertEquals("b", fourth.text(0, 0));
         assertEquals("x", fourth.text(0, 1));
+    }
+
+    @Test public void wrapHintsFollowLinesThatReachTheLastColumn() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("grid_resize", 1, 3, 3), wrappedLine(0, 0, List.of("a", 1, 3)),
+                wrappedLine(1, 0, cell("b", 1)), flush()));
+        assertTrue(grid.frame().wrapped(0));
+        assertFalse(grid.frame().wrapped(1));
+        grid.handleRedraw(List.of(line(0, 0, cell("x", 1)), flush()));
+        assertTrue(grid.frame().wrapped(0));
+        grid.handleRedraw(List.of(line(0, 2, cell("y", 1)), wrappedLine(2, 1, cell("c", 1), cell("d", 1)), flush()));
+        NeovimGrid.Frame frame = grid.frame();
+        assertFalse(frame.wrapped(0));
+        assertTrue(frame.wrapped(2));
+        grid.handleRedraw(List.of(event("grid_scroll", 1, 0, 3, 0, 3, 1, 0), flush()));
+        assertTrue(grid.frame().wrapped(1));
+        assertFalse(grid.frame().wrapped(2));
+        assertTrue(frame.wrapped(2));
+        grid.handleRedraw(List.of(event("grid_clear", 1), flush()));
+        assertFalse(grid.frame().wrapped(1));
     }
 
     @Test public void scrollColumnsDoesNotOverwriteSources() {

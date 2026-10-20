@@ -32,6 +32,8 @@ final class EditorSession implements NeovimView.Listener {
         void onStatus(String message, boolean ready);
         /** A transient notice, such as the result of updating an original document. */
         default void onMessage(String message) {}
+        /** Neovim's mode_change name, such as "normal" or "insert". */
+        default void onModeChanged(String mode) {}
     }
 
     static final String READY = "Neovim · local session";
@@ -50,6 +52,7 @@ final class EditorSession implements NeovimView.Listener {
     private Observer observer;
     private boolean started;
     private boolean attached;
+    private String mode = "normal";
     private int uiColumns;
     private int uiRows;
     private boolean initialized;
@@ -74,6 +77,7 @@ final class EditorSession implements NeovimView.Listener {
         view = next;
         observer = nextObserver;
         nextObserver.onStatus(status, statusReady);
+        nextObserver.onModeChanged(mode);
         // A recreated Activity may follow a new system theme.
         if (attached) theme(next);
         next.setListener(this);
@@ -158,6 +162,12 @@ final class EditorSession implements NeovimView.Listener {
                                 case "redraw" -> {
                                     if (view != null) view.handleRedraw(args);
                                     else grid.handleRedraw(args);
+                                    // Back is decided before its gesture, so follow each flushed frame's mode.
+                                    String next = grid.frame().mode;
+                                    if (!next.isEmpty() && !next.equals(mode)) {
+                                        mode = next;
+                                        if (observer != null) observer.onModeChanged(mode);
+                                    }
                                 }
                                 case "android_clipboard_set" -> copy(args);
                                 case "android_document_written" -> {

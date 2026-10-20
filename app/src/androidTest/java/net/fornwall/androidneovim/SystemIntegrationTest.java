@@ -9,8 +9,10 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.MimeTypeMap;
+import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -224,6 +226,27 @@ public final class SystemIntegrationTest {
         } finally {
             instrumentation.removeMonitor(monitor);
         }
+    }
+
+    @Test
+    public void backLeavesInsertModeAndKeepsItsDefaultInNormalMode() throws Exception {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            assertFalse(backEscapes(activity));
+            request("nvim_input", "i");
+            await(() -> backEscapes(activity));
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            await(() -> "n".equals(((Map<?, ?>) request("nvim_get_mode")).get("mode")));
+            await(() -> !backEscapes(activity));
+            assertEquals(Lifecycle.State.RESUMED, activity.getState());
+        }
+    }
+
+    private static boolean backEscapes(ActivityScenario<MainActivity> activity) {
+        AtomicReference<Boolean> escapes = new AtomicReference<>();
+        activity.onActivity(a -> escapes.set(a.backEscapes()));
+        return escapes.get();
     }
 
     private void save(File file, String line) throws Exception {

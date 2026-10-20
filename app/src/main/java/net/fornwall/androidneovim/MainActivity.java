@@ -14,6 +14,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,12 @@ public final class MainActivity extends Activity {
     private Button restart;
     /** The file being exported; it outlives process death while Android's picker is shown. */
     private String exporting;
+    // Back leaves Insert, Visual and other modes. In Normal mode, Android handles it, with its
+    // predictive animation; that needs the callback registered ahead of the gesture.
+    private final OnBackInvokedCallback escape = () -> session.input("<Esc>");
+    private boolean editorReady;
+    private boolean normalMode = true;
+    private boolean escapes;
 
     @Override
     public void onCreate(Bundle state) {
@@ -106,8 +114,14 @@ public final class MainActivity extends Activity {
                 statusRow.setVisibility(ready && message.equals(EditorSession.READY) ? View.GONE : View.VISIBLE);
                 restart.setVisibility(session.stopped() ? View.VISIBLE : View.GONE);
                 for (Button action : actions) action.setEnabled(ready);
+                editorReady = ready;
+                updateBack();
             }
             @Override public void onMessage(String message) { message(message); }
+            @Override public void onModeChanged(String mode) {
+                normalMode = mode.equals("normal");
+                updateBack();
+            }
         });
         if (state == null) handle(getIntent());
     }
@@ -135,6 +149,14 @@ public final class MainActivity extends Activity {
             }
             default -> { }
         }
+    }
+
+    private void updateBack() {
+        boolean next = editorReady && !normalMode;
+        if (next == escapes) return;
+        escapes = next;
+        if (next) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, escape);
+        else getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(escape);
     }
 
     private void open(CompletableFuture<File> imported) {
@@ -254,6 +276,7 @@ public final class MainActivity extends Activity {
     }
 
     NeovimView editorView() { return editor; }
+    boolean backEscapes() { return escapes; }
 
     @Override
     protected void onStop() {

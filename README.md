@@ -28,7 +28,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 
 ## Use
 
-- Press `i` to insert text and **Esc** to return to normal mode.
+- Press `i` to insert text and **Esc** to return to normal mode. **Back** also
+  sends Esc outside normal mode; in normal mode it leaves the app as usual.
 - **Save** / `:w` writes the current file to the app's private storage. Relative
   paths such as `:e todo.txt` resolve there too.
 - **Open** edits a document chosen through Android's picker, and the app also

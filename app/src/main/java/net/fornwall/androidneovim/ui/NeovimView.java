@@ -516,7 +516,7 @@ public final class NeovimView extends View {
     @Override public boolean onCheckIsTextEditor() { return true; }
 
     /** Insert, Replace and command-line modes edit text; in other modes keys are commands. */
-    static boolean textEntry(String mode) {
+    static boolean editsText(String mode) {
         // Neovim also reports "replace" while the cursor is behind a floating window.
         return switch (mode) {
             case "insert", "replace", "showmatch", "cmdline_normal", "cmdline_insert", "cmdline_replace" -> true;
@@ -526,7 +526,7 @@ public final class NeovimView extends View {
 
     /** Restarts the IME when the flushed mode starts or stops editing text. */
     private void updateInputMode() {
-        boolean text = textEntry(grid.frame().mode);
+        boolean text = editsText(grid.frame().mode);
         if (text == textEntry) return;
         textEntry = text;
         resetIme();
@@ -551,7 +551,7 @@ public final class NeovimView extends View {
             private boolean current() { return active() && generation == connectionGeneration; }
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
-                if (generation == connectionGeneration) composition = "";
+                if (current()) composition = "";
                 if (text != null && text.length() > 0) {
                     commitIme(text.toString());
                     committed.append(text);

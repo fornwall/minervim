@@ -48,14 +48,15 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
   from the row, the soft keyboard, or a hardware keyboard.
 - Keyboard, local IME composition, and clipboard paste are supported. **Paste**
-  is capped at 64 Ki characters. The soft keyboard's Enter is `<CR>`, and
-  multi-line text it commits (clipboard suggestions, dictation) is pasted
-  rather than typed, so mappings and autoindent do not apply to it. Text still
-  being composed is sent before another key, a tap, a sticky modifier, or focus
-  loss. Outside Insert, Replace and command-line modes the soft keyboard is asked
-  for plain keys, so a composing keyboard does not hold back commands such as
-  `dd`. On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys
-  are `<k0>`–`<k9>`, `<kPlus>`, `<kEnter>` and so on (their characters unless
+  is capped at 64 Ki characters.
+- The soft keyboard's Enter is `<CR>`, and multi-line text it commits (clipboard
+  suggestions, dictation) is pasted rather than typed, so mappings and
+  autoindent do not apply to it. Text still being composed is sent before
+  another key, a tap, a sticky modifier, or focus loss. Outside Insert, Replace
+  and command-line modes the keyboard is asked for plain keys, so a composing
+  keyboard does not hold back commands such as `dd`.
+- On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys are
+  `<k0>`–`<k9>`, `<kPlus>`, `<kEnter>` and so on (their characters unless
   mapped), and right Alt is Alt on layouts without AltGr characters (US,
   ChromeOS).
 - `FocusGained` and `FocusLost` fire when the app window gains or loses input
@@ -128,15 +129,16 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
-JVM tests cover grid update semantics, MessagePack limits and RPC lifecycle,
-including requests from Neovim.
+JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
+lifecycle, including requests from Neovim.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
-round-trips, background saves, and editor shutdown. UI tests
-also cover hardware key notation, sticky modifiers, IME lifecycle, touch gestures,
-and accessibility.
+round-trips, background saves, window focus events, IME line breaks and modes,
+and editor shutdown. UI tests also cover hardware key notation, sticky modifiers,
+IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
+accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

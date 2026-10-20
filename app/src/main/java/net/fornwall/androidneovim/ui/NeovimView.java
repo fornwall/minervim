@@ -3,6 +3,7 @@ package net.fornwall.androidneovim.ui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
@@ -46,7 +47,9 @@ public final class NeovimView extends View {
     // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     private static final int ADVANCE_BITS = 9;
-    private final NeovimGrid grid = new NeovimGrid();
+    // The system theme picks Neovim's 'background', so frames before its colors arrive match it.
+    private final NeovimGrid grid = new NeovimGrid((getResources().getConfiguration().uiMode
+            & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_NO);
     private final Paint[] textPaints = new Paint[4];
     private final int[] maximumRun = new int[4];
     private final float[] textScales = new float[4];

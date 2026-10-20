@@ -3,6 +3,7 @@ package net.fornwall.androidneovim.ui;
 import static org.junit.Assert.*;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -361,6 +362,22 @@ public class NeovimViewTest {
             Bitmap wide = render(view, 4, List.of(List.of(" ", 0), List.of("界"), List.of(""), List.of(" ")));
             int[] wideInk = inkColumns(wide);
             assertEquals(art(wide), wideInk[0] - w, 3 * w - wideInk[1] - 1, 2.5f);
+        });
+    }
+
+    @Test public void framesBeforeNeovimColorsFollowTheSystemTheme() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            for (int night : new int[] {Configuration.UI_MODE_NIGHT_NO, Configuration.UI_MODE_NIGHT_YES}) {
+                var context = instrumentation.getTargetContext();
+                Configuration configuration = new Configuration(context.getResources().getConfiguration());
+                configuration.uiMode = (configuration.uiMode & ~Configuration.UI_MODE_NIGHT_MASK) | night;
+                NeovimView view = new NeovimView(context.createConfigurationContext(configuration));
+                view.layout(0, 0, 200, 200);
+                Bitmap bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888);
+                view.draw(new Canvas(bitmap));
+                assertEquals(night == Configuration.UI_MODE_NIGHT_NO ? 0xffe0e2ea : 0xff14161b, bitmap.getPixel(190, 190));
+            }
         });
     }
 }

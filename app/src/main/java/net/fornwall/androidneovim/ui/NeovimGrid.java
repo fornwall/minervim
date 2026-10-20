@@ -14,9 +14,9 @@ public final class NeovimGrid {
     private int[][] attributes = {{0}};
     private Highlight[] highlights = new Highlight[64];
     private boolean highlightsShared;
-    private int foreground = 0xffd4d4d4;
-    private int background = 0xff181818;
-    private int special = foreground;
+    private int foreground;
+    private int background;
+    private int special;
     private int cursorRow;
     private int cursorColumn;
     private String cursorShape = "block";
@@ -25,7 +25,15 @@ public final class NeovimGrid {
     private int mode = -1;
     private List<?> modes = List.of();
     private boolean busy;
-    private Frame frame = snapshot();
+    private Frame frame;
+
+    /** Until default_colors_set, frames use Neovim's built-in Normal colors for a dark or light background. */
+    public NeovimGrid(boolean dark) {
+        foreground = special = dark ? 0xffe0e2ea : 0xff14161b;
+        background = dark ? 0xff14161b : 0xffe0e2ea;
+        frame = snapshot();
+    }
+    public NeovimGrid() { this(true); }
 
     public Frame frame() { return frame; }
 

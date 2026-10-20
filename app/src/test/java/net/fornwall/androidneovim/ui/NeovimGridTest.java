@@ -68,6 +68,17 @@ public class NeovimGridTest {
         assertEquals("c", grid.frame().text(0, 3));
     }
 
+    @Test public void defaultColorsFollowTheBackgroundUntilNeovimSetsThem() {
+        NeovimGrid.Frame dark = new NeovimGrid(true).frame(), light = new NeovimGrid(false).frame();
+        assertEquals(0xffe0e2ea, dark.foreground);
+        assertEquals(0xff14161b, dark.background);
+        assertEquals(0xff14161b, light.foreground);
+        assertEquals(0xffe0e2ea, light.background);
+        NeovimGrid grid = new NeovimGrid(false);
+        grid.handleRedraw(List.of(event("default_colors_set", 0x112233, 0x445566, 0x778899, 0, 0), flush()));
+        assertEquals(0xff445566, grid.frame().background);
+    }
+
     @Test public void colorsAreRgbAndReverseUsesDefaults() {
         NeovimGrid grid = new NeovimGrid();
         grid.handleRedraw(List.of(event("default_colors_set", 0x112233, 0x445566, 0x778899, 0, 0),

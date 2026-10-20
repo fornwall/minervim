@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.Test;
@@ -186,7 +187,12 @@ public final class EditorIntegrationTest {
             awaitUi(session);
             request(session, "nvim_exec_lua", "vim.g.focus = ''; vim.api.nvim_create_autocmd({'FocusLost', 'FocusGained'}, "
                     + "{callback = function(event) vim.g.focus = vim.g.focus .. event.event:sub(6, 6) end})", List.of());
-            // A dialog takes window focus from the editor.
+            // The window must have focus before a dialog can take it from the editor.
+            await(() -> {
+                AtomicBoolean focused = new AtomicBoolean();
+                activity.onActivity(a -> focused.set(a.hasWindowFocus()));
+                return focused.get();
+            });
             AtomicReference<Dialog> dialog = new AtomicReference<>();
             activity.onActivity(a -> dialog.set(new AlertDialog.Builder(a).setMessage("Focus").show()));
             await(() -> String.valueOf(request(session, "nvim_get_var", "focus")).endsWith("L"));

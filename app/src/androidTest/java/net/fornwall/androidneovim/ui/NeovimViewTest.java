@@ -193,13 +193,13 @@ public class NeovimViewTest {
                 }
                 assertEquals(List.of("right press 1,1", "right drag 1,4", "right release 1,4"), input.mouse);
                 input.mouse.clear();
-                float before = view.fontSize();
+                float before = view.fontSize(), start = pinchStart(instrumentation.getTargetContext()), step = start / 20;
                 long t = 0;
-                view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300));
-                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300));
-                for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 40 * i));
-                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 700));
-                view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 700));
+                view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, start));
+                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start));
+                for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, start + step * i));
+                view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start + step * 10));
+                view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, start + step * 10));
                 assertTrue(view.fontSize() > before);
                 assertTrue(view.fontSize() <= 32);
                 assertTrue(input.mouse.isEmpty());
@@ -208,6 +208,14 @@ public class NeovimViewTest {
             if (hadSize) preferences.edit().putFloat("font_size_sp", savedSize).commit();
             else preferences.edit().remove("font_size_sp").commit();
         }
+    }
+
+    /**
+     * The span a pinch starts at. ScaleGestureDetector ignores spans below its minimum (27 mm), so the spans
+     * scale with the screen density; the tests grow them by half over ten moves.
+     */
+    private static float pinchStart(android.content.Context context) {
+        return android.view.ViewConfiguration.get(context).getScaledMinimumScalingSpan() + 100;
     }
 
     /** Two fingers {@code span} pixels apart, centred at (500, 500). */
@@ -517,17 +525,17 @@ public class NeovimViewTest {
             view.setListener(log);
             view.layout(0, 0, 1000, 1000);
             log.sizes.clear();
-            float before = view.fontSize();
+            float before = view.fontSize(), start = pinchStart(instrumentation.getTargetContext()), step = start / 20;
             long t = 0;
-            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300));
-            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300));
-            for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 20 * i));
+            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, start));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start));
+            for (int i = 1; i <= 10; i++) view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, start + step * i));
             // During the gesture the last frame is drawn scaled; the font and grid size change once, at its end.
             assertEquals(before, view.fontSize(), 0);
             assertTrue(log.sizes.isEmpty());
             view.draw(new Canvas(Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888)));
-            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 500));
-            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 500));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start + step * 10));
+            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, start + step * 10));
             assertTrue(view.fontSize() > before);
             assertEquals(List.of(view.columns() + "x" + view.rows()), log.sizes);
         });
@@ -787,19 +795,19 @@ public class NeovimViewTest {
             view.onTouchEvent(swipe(6010, MotionEvent.ACTION_UP, 5.5f * w, 2.5f * h));
             assertEquals(List.of("wheel down 15,5", "wheel down 15,5", "wheel down 15,5", "wheel down 15,5"), input.mouse);
             input.mouse.clear();
-            float before = view.fontSize();
+            float before = view.fontSize(), start = pinchStart(instrumentation.getTargetContext()), step = start / 20;
             long t = 7000;
             int source = InputDevice.SOURCE_MOUSE, pinch = MotionEvent.CLASSIFICATION_PINCH;
-            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, 300, 1, source, pinch));
-            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 300, 1, source, pinch));
+            view.onTouchEvent(pinch(t, MotionEvent.ACTION_DOWN, 1, start, 1, source, pinch));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_DOWN | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start, 1, source, pinch));
             for (int i = 1; i <= 10; i++) {
-                float scale = (300 + 40 * i) / (300 + 40 * (i - 1f));
-                view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, 300 + 40 * i, scale, source, pinch));
+                float scale = (start + step * i) / (start + step * (i - 1));
+                view.onTouchEvent(pinch(t += 20, MotionEvent.ACTION_MOVE, 2, start + step * i, scale, source, pinch));
             }
             // Like a touchscreen pinch, it scales the frame and changes the font only when it ends.
             assertEquals(before, view.fontSize(), 0);
-            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, 700, 1, source, pinch));
-            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, 700, 1, source, pinch));
+            view.onTouchEvent(pinch(t += 10, MotionEvent.ACTION_POINTER_UP | (1 << MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, start + step * 10, 1, source, pinch));
+            view.onTouchEvent(pinch(t + 10, MotionEvent.ACTION_UP, 1, start + step * 10, 1, source, pinch));
             assertTrue(view.fontSize() > before);
             assertTrue(input.mouse.isEmpty());
         });

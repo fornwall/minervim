@@ -301,11 +301,13 @@ public class NeovimViewTest {
         }
     }
 
-    /** Draws one flushed white-on-black row into a bitmap; busy hides the cursor. */
-    private static Bitmap render(NeovimView view, int columns, List<?> cells) {
-        view.handleRedraw(List.of(List.of("default_colors_set", List.of(0xffffff, 0, 0xff0000, 0, 0)),
+    /** Draws one flushed white-on-black row, after the given events, into a bitmap; busy hides the cursor. */
+    private static Bitmap render(NeovimView view, int columns, List<?> cells, List<?>... events) {
+        List<Object> redraw = new ArrayList<>(List.of(events));
+        redraw.addAll(List.of(List.of("default_colors_set", List.of(0xffffff, 0, 0xff0000, 0, 0)),
                 List.of("grid_resize", List.of(1, columns, 1)), List.of("grid_line", List.of(1, 0, 0, cells, false)),
                 List.of("busy_start", List.of()), List.of("flush", List.of())));
+        view.handleRedraw(redraw);
         int width = (int) Math.ceil(columns * view.cellWidth()), height = (int) view.cellHeight();
         view.layout(0, 0, width, height);
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
@@ -315,14 +317,15 @@ public class NeovimViewTest {
 
     private static boolean ink(Bitmap bitmap, int x, int y) { return Color.green(bitmap.getPixel(x, y)) > 96; }
 
+    private static boolean ink(Bitmap bitmap, int y, int left, int right) {
+        for (int x = Math.max(0, left); x < Math.min(bitmap.getWidth(), right); x++) if (ink(bitmap, x, y)) return true;
+        return false;
+    }
+
     /** The number of pixel rows with ink in columns [left, right). */
     private static int inkRows(Bitmap bitmap, int left, int right) {
         int count = 0;
-        for (int y = 0; y < bitmap.getHeight(); y++) {
-            for (int x = Math.max(0, left); x < Math.min(bitmap.getWidth(), right); x++) {
-                if (ink(bitmap, x, y)) { count++; break; }
-            }
-        }
+        for (int y = 0; y < bitmap.getHeight(); y++) if (ink(bitmap, y, left, right)) count++;
         return count;
     }
 
@@ -333,6 +336,24 @@ public class NeovimViewTest {
             if (inkRows(bitmap, x, x + 1) > 0) { first = Math.min(first, x); last = x; }
         }
         return new int[] {first, last};
+    }
+
+    /** Rows [top, bottom) of each band of pixel rows with ink in columns [left, right). */
+    private static List<List<Integer>> bands(Bitmap bitmap, int left, int right) {
+        List<List<Integer>> bands = new ArrayList<>();
+        for (int y = 0, top = -1; y <= bitmap.getHeight(); y++) {
+            boolean ink = y < bitmap.getHeight() && ink(bitmap, y, left, right);
+            if (ink && top < 0) top = y;
+            if (!ink && top >= 0) { bands.add(List.of(top, y)); top = -1; }
+        }
+        return bands;
+    }
+
+    /** The number of separate ink runs on pixel row y in columns [left, right). */
+    private static int runs(Bitmap bitmap, int y, int left, int right) {
+        int count = 0;
+        for (int x = left; x < right; x++) if (ink(bitmap, x, y) && (x == left || !ink(bitmap, x - 1, y))) count++;
+        return count;
     }
 
     /** The bitmap as text, for assertion messages. */
@@ -378,6 +399,31 @@ public class NeovimViewTest {
                 view.draw(new Canvas(bitmap));
                 assertEquals(night == Configuration.UI_MODE_NIGHT_NO ? 0xffe0e2ea : 0xff14161b, bitmap.getPixel(190, 190));
             }
+        });
+    }
+
+    private static List<?> highlight(int id, String attribute) {
+        return List.of("hl_attr_define", List.of(id, java.util.Map.of(attribute, true), java.util.Map.of(), List.of()));
+    }
+
+    @Test public void decorationsUseFontMetricsAndTheTextColor() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            Bitmap bitmap = render(view, 10, List.of(List.of(" ", 1, 2), List.of(" ", 2, 2), List.of(" ", 3, 2),
+                    List.of(" ", 4, 2), List.of(" ", 5, 2)), highlight(1, "underline"), highlight(2, "strikethrough"),
+                    highlight(3, "underdouble"), highlight(4, "underdotted"), highlight(5, "underdashed"));
+            int w = (int) view.cellWidth(), h = (int) view.cellHeight();
+            // Without guisp the lines are white like the text, not Neovim's red default special color.
+            List<List<Integer>> underline = bands(bitmap, 1, 2 * w - 1), strike = bands(bitmap, 2 * w + 1, 4 * w - 1);
+            assertEquals(art(bitmap), 1, underline.size());
+            assertEquals(art(bitmap), 1, strike.size());
+            assertTrue(art(bitmap), underline.get(0).get(0) >= h / 2 && underline.get(0).get(1) <= h);
+            assertTrue(art(bitmap), strike.get(0).get(1) <= underline.get(0).get(0) - 2 && strike.get(0).get(0) >= h / 4);
+            assertEquals(art(bitmap), 2, bands(bitmap, 4 * w + 1, 6 * w - 1).size());
+            int dotted = bands(bitmap, 6 * w + 1, 8 * w - 1).get(0).get(0), dashed = bands(bitmap, 8 * w, 10 * w).get(0).get(0);
+            assertTrue(art(bitmap), runs(bitmap, dotted, 6 * w, 8 * w) > 4);
+            assertEquals(art(bitmap), 2, runs(bitmap, dashed, 8 * w, 10 * w));
         });
     }
 }

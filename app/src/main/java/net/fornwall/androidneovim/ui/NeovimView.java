@@ -65,6 +65,7 @@ public final class NeovimView extends View {
     private float cellWidth;
     private float cellHeight;
     private float baseline;
+    private float underlineTop, doubleUnderlineTop, underlineThickness, strikeTop, strikeThickness;
     private Listener listener;
     private ModifierListener modifierListener;
     private boolean stickyCtrl;
@@ -146,6 +147,13 @@ public final class NeovimView extends View {
         Paint.FontMetrics metrics = textPaints[0].getFontMetrics();
         cellHeight = (float) Math.ceil(metrics.descent - metrics.ascent);
         baseline = cellHeight - metrics.descent;
+        // Decorations follow the font's metrics, on whole pixels and inside the cell.
+        Paint regular = textPaints[0];
+        underlineThickness = Math.min(cellHeight, Math.max(1, Math.round(regular.getUnderlineThickness())));
+        underlineTop = Math.max(0, Math.min(cellHeight - underlineThickness, Math.round(baseline + regular.getUnderlinePosition())));
+        doubleUnderlineTop = Math.max(0, Math.min(underlineTop, cellHeight - 3 * underlineThickness));
+        strikeThickness = Math.min(cellHeight, Math.max(1, Math.round(regular.getStrikeThruThickness())));
+        strikeTop = Math.max(0, Math.min(cellHeight - strikeThickness, Math.round(baseline + regular.getStrikeThruPosition())));
         // Styles may use other faces (italic is narrower) and advances are quantized, so each style is scaled
         // to the cell; ASCII runs are then bounded so that accumulated advance error stays below 1/4 pixel.
         float[] advances = new float[ASCII.length()];
@@ -263,7 +271,7 @@ public final class NeovimView extends View {
             int attribute = frame.attribute(row, start);
             for (end = start + 1; end < visibleColumns && frame.attribute(row, end) == attribute; end++) { }
             NeovimGrid.Highlight highlight = frame.highlight(attribute);
-            drawDecorations(canvas, frame, highlight, start * cellWidth, end * cellWidth, y);
+            drawUnderline(canvas, frame, highlight, start, end, y);
             int style = style(highlight);
             Paint paint = textPaints[style];
             paint.setColor(frame.foreground(highlight));
@@ -293,6 +301,10 @@ public final class NeovimView extends View {
                 drawCell(canvas, frame, row, column, y, style);
             }
             drawRun(canvas, runStart, trimmed, y, paint);
+            if (highlight.strikethrough) {
+                fill.setColor(frame.decoration(highlight));
+                canvas.drawRect(start * cellWidth, y + strikeTop, end * cellWidth, y + strikeTop + strikeThickness, fill);
+            }
         }
     }
 
@@ -300,12 +312,26 @@ public final class NeovimView extends View {
         if (length > 0) canvas.drawTextRun(run, 0, length, 0, length, column * cellWidth, y + baseline, false, paint);
     }
 
-    private void drawDecorations(Canvas canvas, NeovimGrid.Frame frame, NeovimGrid.Highlight highlight, float left, float right, float y) {
-        if (!highlight.underline && !highlight.undercurl && !highlight.strikethrough) return;
-        fill.setColor(frame.decoration(highlight));
-        if (highlight.underline) canvas.drawRect(left, y + cellHeight - 1, right, y + cellHeight, fill);
-        if (highlight.strikethrough) canvas.drawRect(left, y + cellHeight / 2, right, y + cellHeight / 2 + 1, fill);
-        if (highlight.undercurl) {
+    /** Underlines precede the span's glyphs, so descenders stay visible; strikethrough follows them. */
+    private void drawUnderline(Canvas canvas, NeovimGrid.Frame frame, NeovimGrid.Highlight highlight, int start, int end, float y) {
+        float left = start * cellWidth, right = end * cellWidth, top = y + underlineTop, thickness = underlineThickness;
+        if (highlight.underline) {
+            fill.setColor(frame.decoration(highlight));
+            if (highlight.underdouble) {
+                top = y + doubleUnderlineTop;
+                canvas.drawRect(left, top, right, top + thickness, fill);
+                canvas.drawRect(left, top + 2 * thickness, right, top + 3 * thickness, fill);
+            } else if (highlight.underdotted) {
+                // Dots and dashes keep their phase across spans.
+                for (float x = (float) Math.ceil(left / (2 * thickness)) * 2 * thickness; x < right; x += 2 * thickness) {
+                    canvas.drawRect(x, top, Math.min(right, x + thickness), top + thickness, fill);
+                }
+            } else if (highlight.underdashed) {
+                for (int column = start; column < end; column++) {
+                    canvas.drawRect((column + 0.2f) * cellWidth, top, (column + 0.8f) * cellWidth, top + thickness, fill);
+                }
+            } else canvas.drawRect(left, top, right, top + thickness, fill);
+        } else if (highlight.undercurl) {
             float amplitude = Math.max(1, cellHeight / 16), half = cellWidth / 2;
             float middle = y + cellHeight - amplitude - curl.getStrokeWidth() / 2;
             curlPath.rewind();

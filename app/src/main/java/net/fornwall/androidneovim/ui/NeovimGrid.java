@@ -212,7 +212,11 @@ public final class NeovimGrid {
         final boolean reverse;
         final boolean bold;
         final boolean italic;
+        /** Any straight underline: single, double, dotted or dashed. */
         final boolean underline;
+        final boolean underdouble;
+        final boolean underdotted;
+        final boolean underdashed;
         final boolean undercurl;
         final boolean strikethrough;
         Highlight(Map<?, ?> style) {
@@ -223,8 +227,10 @@ public final class NeovimGrid {
             bold = Boolean.TRUE.equals(style.get("bold"));
             italic = Boolean.TRUE.equals(style.get("italic"));
             undercurl = Boolean.TRUE.equals(style.get("undercurl"));
-            underline = Boolean.TRUE.equals(style.get("underline")) || Boolean.TRUE.equals(style.get("underdouble")) || Boolean.TRUE.equals(style.get("underdotted"))
-                    || Boolean.TRUE.equals(style.get("underdashed"));
+            underdouble = Boolean.TRUE.equals(style.get("underdouble"));
+            underdotted = Boolean.TRUE.equals(style.get("underdotted"));
+            underdashed = Boolean.TRUE.equals(style.get("underdashed"));
+            underline = Boolean.TRUE.equals(style.get("underline")) || underdouble || underdotted || underdashed;
             strikethrough = Boolean.TRUE.equals(style.get("strikethrough"));
         }
     }

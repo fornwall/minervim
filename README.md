@@ -85,8 +85,8 @@ Latin, Greek and Cyrillic) in text runs scaled to the cell grid. Other clusters,
 as CJK and symbols from fallback fonts, are drawn per cell: centred, or narrowed to
 fit when wider than their cells. Cross-cell ligatures, cached row rendering, rich
 accessibility navigation, and full IME surrounding-text behavior are future work.
-Undercurl renders as a wave; other underline variants render as a simple
-underline.
+Single, double, dotted and dashed underlines and strikethrough follow the font's
+line metrics and use the text color unless `guisp` sets one; undercurl is a wave.
 
 ## Architecture
 

@@ -64,9 +64,10 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - The soft keyboard's Enter is `<CR>`, and multi-line text it commits (clipboard
   suggestions, dictation) is pasted rather than typed, so mappings and
   autoindent do not apply to it. Text still being composed is sent before
-  another key, a tap, a sticky modifier, or focus loss. Outside Insert, Replace
-  and command-line modes the keyboard is asked for plain keys, so a composing
-  keyboard does not hold back commands such as `dd`. Android drops what a
+  another key, a tap, a sticky modifier, or focus loss. Outside Insert and
+  command-line modes the keyboard is asked for plain keys, so a composing
+  keyboard does not hold back commands such as `dd`. Replace mode and `r` take
+  plain keys too, so CJK keyboards cannot compose there. Android drops what a
   keyboard sends while it restarts, so the switch waits until the keyboard has
   been idle for 150 ms; a key typed at that very moment can still be lost.
 - On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys are

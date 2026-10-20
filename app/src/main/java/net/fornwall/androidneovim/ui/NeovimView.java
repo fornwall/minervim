@@ -547,11 +547,14 @@ public final class NeovimView extends View {
 
     @Override public boolean onCheckIsTextEditor() { return true; }
 
-    /** Insert, Replace and command-line modes edit text; in other modes keys are commands. */
+    /**
+     * Insert and command-line modes edit text; in other modes keys are commands. Neovim reports "replace" for
+     * Replace mode, while r waits for its character, and while the cursor is behind a floating window, so it
+     * takes keys: a composing keyboard would hold back r's character and Normal-mode commands.
+     */
     static boolean editsText(String mode) {
-        // Neovim also reports "replace" while the cursor is behind a floating window.
         return switch (mode) {
-            case "insert", "replace", "showmatch", "cmdline_normal", "cmdline_insert", "cmdline_replace" -> true;
+            case "insert", "showmatch", "cmdline_normal", "cmdline_insert", "cmdline_replace" -> true;
             default -> false;
         };
     }

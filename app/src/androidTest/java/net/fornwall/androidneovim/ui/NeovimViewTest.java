@@ -734,6 +734,8 @@ public class NeovimViewTest {
             main(() -> view.onCreateInputConnection(info));
             assertEquals(InputType.TYPE_NULL, info.inputType);
             assertTrue((info.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0);
+            assertFalse(NeovimView.editsText("replace"));
+            assertTrue(NeovimView.editsText("cmdline_replace"));
             main(() -> view.handleRedraw(mode("normal", 0)));
             assertEquals(InputType.TYPE_NULL, inputType(view));
             main(() -> view.handleRedraw(mode("insert", 1)));

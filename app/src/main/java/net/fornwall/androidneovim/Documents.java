@@ -75,14 +75,14 @@ final class Documents {
                 File local = new File(entry.getKey());
                 if (copy.state() != Copy.FORGOTTEN && copy.uri().equals(uri.toString()) && hash.equals(localSha256(local))) {
                     char state = writable || copy.state() == Copy.WRITABLE ? Copy.WRITABLE : Copy.READ_ONLY;
-                    Copy current = new Copy(state, metadata.modified, metadata.size, hash, copy.uri());
-                    copies.edit().putString(entry.getKey(), current.encode()).apply();
+                    Copy current = new Copy(state, metadata.modified, content.length, hash, copy.uri());
+                    copies.edit().putString(entry.getKey(), current.encode()).commit();
                     return local;
                 }
             }
             File destination = store(metadata.name == null ? "document.txt" : metadata.name, content);
             remember(destination, new Copy(writable ? Copy.WRITABLE : Copy.READ_ONLY,
-                    metadata.modified, metadata.size, hash, uri.toString()));
+                    metadata.modified, content.length, hash, uri.toString()));
             return destination;
         });
     }
@@ -93,7 +93,7 @@ final class Documents {
             byte[] content = text.getBytes(StandardCharsets.UTF_8);
             if (content.length > MAX_BYTES) throw new IOException("Text exceeds the 4 MiB import limit");
             File destination = store(name, content);
-            remember(destination, new Copy(Copy.READ_ONLY, -1, -1, sha256(content), ""));
+            remember(destination, new Copy(Copy.READ_ONLY, -1, content.length, sha256(content), ""));
             return destination;
         });
     }
@@ -113,8 +113,8 @@ final class Documents {
             byte[] content = readLocal(local);
             write(uri, content);
             Metadata updated = metadata(uri);
-            Copy current = new Copy(Copy.WRITABLE, updated.modified, updated.size, sha256(content), copy.uri());
-            copies.edit().putString(path, current.encode()).apply();
+            Copy current = new Copy(Copy.WRITABLE, updated.modified, content.length, sha256(content), copy.uri());
+            copies.edit().putString(path, current.encode()).commit();
             return WriteBack.UPDATED;
         });
     }
@@ -151,7 +151,7 @@ final class Documents {
                 }
             }
         }
-        editor.apply();
+        editor.commit();
     }
 
     private File store(String name, byte[] content) throws IOException {
@@ -178,7 +178,7 @@ final class Documents {
                 editor.putString(entry.getKey(), other.forgotten().encode());
             }
         }
-        editor.putString(local.getCanonicalPath(), copy.encode()).apply();
+        editor.putString(local.getCanonicalPath(), copy.encode()).commit();
         List<String> remembered = new ArrayList<>();
         for (Map.Entry<String, ?> entry : copies.getAll().entrySet()) {
             if (Copy.decode(String.valueOf(entry.getValue())).state() != Copy.FORGOTTEN) remembered.add(entry.getKey());
@@ -194,7 +194,7 @@ final class Documents {
             editor.putString(path, forgotten.encode());
             released.add(forgotten.uri());
         }
-        editor.apply();
+        editor.commit();
         for (String uri : released) if (!uri.isEmpty()) release(uri);
     }
 
@@ -274,8 +274,9 @@ final class Documents {
 
     /**
      * What is remembered about a local copy: whether it updates a writable original, has a read-only
-     * one, or was forgotten, the original's URI (empty for shared text), and the original's
-     * last-modified time, size and content hash when the copy last matched it (-1 or null if unknown).
+     * one, or was forgotten, the original's URI (empty for shared text), and, from when the copy last
+     * matched the original, the provider's last-modified time and the content's size and hash (-1 or
+     * null if unknown).
      */
     record Copy(char state, long modified, long size, String sha256, String uri) {
         static final char WRITABLE = 'w', READ_ONLY = 'r', FORGOTTEN = 'x';
@@ -300,11 +301,11 @@ final class Documents {
 
         /**
          * Whether the original, with the reported last-modified time and size, is still the version this
-         * copy matched. Only when metadata cannot tell is its content hashed.
+         * copy matched. Providers may update their metadata some time after a write, so only an unchanged
+         * time and size skip hashing the content.
          */
         boolean matches(long modified, long size, IoSupplier<String> sha256) throws Exception {
-            if (size >= 0 && this.size >= 0 && size != this.size) return false;
-            if (modified > 0 && modified == this.modified) return true;
+            if (modified > 0 && modified == this.modified && size >= 0 && size == this.size) return true;
             // A copy remembered by an earlier version has no hash to compare.
             return this.sha256 == null || this.sha256.equals(sha256.get());
         }

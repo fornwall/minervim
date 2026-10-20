@@ -9,6 +9,7 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowInsets;
@@ -105,9 +106,13 @@ public final class SystemIntegrationTest {
             await(() -> readOriginal(uri).equals("v2\n"));
             // Reopening an original keeps its copy while both have the same content.
             assertEquals(local.getCanonicalFile(), documents.importDocument(uri, readWrite).get(10, TimeUnit.SECONDS).getCanonicalFile());
+            // Providers can update the reported time later; the content still matches, so a save updates.
+            touchOriginal(uri, 1_000_000_000_000L);
+            assertEquals(Documents.WriteBack.UPDATED, documents.written(local).get(10, TimeUnit.SECONDS));
 
-            // Changed elsewhere, to content of the same size: a save stays local.
+            // Changed elsewhere, to content of the same size and with a distinct time: a save stays local.
             writeOriginal(uri, "ex\n");
+            touchOriginal(uri, 946_684_800_000L);
             save(local, "v3");
             assertEquals(Documents.WriteBack.CHANGED_ELSEWHERE, documents.written(local).get(10, TimeUnit.SECONDS));
             assertEquals("ex\n", readOriginal(uri));
@@ -308,6 +313,12 @@ public final class SystemIntegrationTest {
         try (OutputStream out = context.getContentResolver().openOutputStream(uri, "wt")) {
             out.write(text.getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    private void touchOriginal(Uri uri, long time) {
+        Bundle extras = new Bundle();
+        extras.putLong("time", time);
+        context.getContentResolver().call(uri, "touch", uri.getLastPathSegment(), extras);
     }
 
     private void configure(String lua) throws Exception {

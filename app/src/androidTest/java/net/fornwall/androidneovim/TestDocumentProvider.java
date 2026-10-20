@@ -5,6 +5,7 @@ import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
@@ -44,6 +45,13 @@ public final class TestDocumentProvider extends ContentProvider {
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         return ParcelFileDescriptor.open(file(uri), ParcelFileDescriptor.parseMode(mode));
+    }
+
+    /** {@code touch} sets the named file's modification time to {@code extras.getLong("time")}. */
+    @Override public Bundle call(String method, String arg, Bundle extras) {
+        if (!"touch".equals(method)) return super.call(method, arg, extras);
+        if (!file(uri(arg)).setLastModified(extras.getLong("time"))) throw new IllegalStateException("Cannot touch " + arg);
+        return null;
     }
 
     @Override public String getType(Uri uri) { return "text/plain"; }

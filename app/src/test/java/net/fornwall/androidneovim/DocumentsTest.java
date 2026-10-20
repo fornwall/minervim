@@ -20,21 +20,21 @@ public class DocumentsTest {
         assertEquals(copy.uri(), copy.forgotten().uri());
     }
 
-    @Test public void metadataDecidesBeforeContentIsHashed() throws Exception {
+    @Test public void onlyAnUnchangedTimeAndSizeSkipComparingContent() throws Exception {
         var copy = new Documents.Copy(Documents.Copy.WRITABLE, 1000, 3, V1, "content://a/1");
         AtomicInteger hashed = new AtomicInteger();
         Documents.IoSupplier<String> same = () -> { hashed.incrementAndGet(); return V1; };
         Documents.IoSupplier<String> other = () -> { hashed.incrementAndGet(); return "other"; };
-        // A different size is a change; an unchanged modification time is not.
-        assertFalse(copy.matches(1000, 4, same));
         assertTrue(copy.matches(1000, 3, other));
-        assertTrue(copy.matches(1000, -1, other));
         assertEquals(0, hashed.get());
-        // A new time or unknown metadata compares content: a touched but unchanged original still matches.
+        // Providers can report a new time or size some time after a write, so content decides.
+        assertTrue(copy.matches(1000, 4, same));
+        assertFalse(copy.matches(1000, 4, other));
         assertTrue(copy.matches(2000, 3, same));
         assertFalse(copy.matches(2000, 3, other));
+        assertFalse(copy.matches(1000, -1, other));
         assertFalse(copy.matches(-1, -1, other));
-        assertEquals(3, hashed.get());
+        assertEquals(6, hashed.get());
         // Without remembered metadata, only the content can tell.
         var unknown = new Documents.Copy(Documents.Copy.WRITABLE, -1, -1, V1, "content://a/1");
         assertFalse(unknown.matches(-1, -1, other));

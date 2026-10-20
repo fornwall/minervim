@@ -25,17 +25,20 @@ vim.cmd('filetype plugin indent on')
 vim.cmd('syntax enable')
 
 -- The + and * registers use Android's clipboard through the UI channel; no clipboard tool runs.
+-- Text crosses as one string, so the number of lines is not limited by the RPC message size.
 local clipboard_limit = 512 * 1024
 local function copy(lines, regtype)
-  local size = 0
-  for _, line in ipairs(lines) do size = size + #line + 1 end
-  if size > clipboard_limit then
+  local text = table.concat(lines, '\n')
+  if #text > clipboard_limit then
     vim.notify('Selection exceeds the 512 KiB Android clipboard limit', vim.log.levels.WARN)
     return
   end
-  vim.rpcnotify(channel, 'android_clipboard_set', lines, regtype)
+  vim.rpcnotify(channel, 'android_clipboard_set', text, regtype)
 end
-local function paste() return vim.rpcrequest(channel, 'android_clipboard_get') end
+local function paste()
+  local text, regtype = unpack(vim.rpcrequest(channel, 'android_clipboard_get'))
+  return { vim.split(text, '\n', { plain = true }), regtype }
+end
 if vim.g.clipboard == nil then
   vim.g.clipboard = { name = 'android', copy = { ['+'] = copy, ['*'] = copy },
                       paste = { ['+'] = paste, ['*'] = paste } }

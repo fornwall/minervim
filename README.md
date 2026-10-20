@@ -141,10 +141,11 @@ Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
-round-trips, requests at a "Press ENTER" prompt, background saves, window focus
-events, IME line breaks and modes, and editor shutdown. UI tests also cover
-hardware key notation, sticky modifiers, IME lifecycle and deletions, mouse
-modifiers, touch and touchpad gestures, and accessibility.
+round-trips (including more lines than one RPC message may hold), requests at a
+"Press ENTER" prompt, background saves, window focus events, IME line breaks and
+modes, and editor shutdown. UI tests also cover hardware key notation, sticky
+modifiers, IME lifecycle and deletions, mouse modifiers, touch and touchpad
+gestures, and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

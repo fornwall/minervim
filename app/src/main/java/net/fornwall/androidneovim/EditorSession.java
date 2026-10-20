@@ -14,8 +14,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -238,23 +236,26 @@ final class EditorSession implements NeovimView.Listener {
         if (initialized && rpc != null) request("nvim_exec_lua", "AndroidNeovim.background()", List.of());
     }
 
+    /** Neovim's lines arrive joined by newlines: one string, however many lines. */
     private void copy(List<?> args) {
-        if (args.size() < 2 || !(args.get(0) instanceof List<?> lines) || !(args.get(1) instanceof String type)) return;
-        StringBuilder text = new StringBuilder();
-        for (Object line : lines) {
-            if (text.length() > 0) text.append('\n');
-            text.append(line instanceof byte[] bytes ? new String(bytes, StandardCharsets.UTF_8) : String.valueOf(line));
-        }
+        if (args.size() < 2 || !(args.get(0) instanceof String text) || !(args.get(1) instanceof String type)) return;
         ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
         if (clipboard == null) return;
-        copiedText = text.toString();
+        try {
+            clipboard.setPrimaryClip(ClipData.newPlainText("Neovim", text));
+        } catch (RuntimeException error) {
+            // Such as a clip that exceeds Android's transaction limit.
+            message("Copy failed: " + rootMessage(error));
+            return;
+        }
+        copiedText = text;
         copiedType = type;
-        clipboard.setPrimaryClip(ClipData.newPlainText("Neovim", copiedText));
     }
 
     /**
-     * The clipboard as Neovim's [lines, regtype]. Linewise and blockwise lines end with an empty
-     * line; an empty regtype lets Neovim infer it. Android reports empty when the app is unfocused.
+     * The clipboard as [text, regtype], which init.lua splits at newlines. Linewise and blockwise text
+     * ends with a newline; an empty regtype lets Neovim infer it. Android reports empty when the app
+     * is unfocused.
      */
     private List<Object> clipboard() {
         ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
@@ -262,8 +263,7 @@ final class EditorSession implements NeovimView.Listener {
         CharSequence value = clip == null || clip.getItemCount() == 0 ? null : clip.getItemAt(0).coerceToText(context);
         String text = value == null ? "" : value.toString();
         if (text.length() > MAX_CLIPBOARD_CHARS) throw new IllegalStateException("Clipboard exceeds 1 Mi characters");
-        String type = text.equals(copiedText) ? copiedType : "";
-        return List.of(new ArrayList<>(Arrays.asList(text.split("\n", -1))), type);
+        return List.of(text, text.equals(copiedText) ? copiedType : "");
     }
 
     private void documentWritten(File local) {

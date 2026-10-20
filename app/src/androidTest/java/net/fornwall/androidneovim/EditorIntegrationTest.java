@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -221,6 +222,26 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void clipboardWithMoreLinesThanTheRpcItemLimitKeepsTheSession() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_exec_lua", "vim.cmd('enew!'); "
+                    + "vim.api.nvim_buf_set_lines(0, 0, -1, true, vim.fn['repeat']({''}, 300000)); vim.cmd('%yank +')", List.of());
+            await(() -> onMain(() -> {
+                ClipData data = clipboard.getPrimaryClip();
+                return data != null && data.getItemAt(0).getText().length() == 300_000;
+            }));
+            assertEquals(300_001L, request(session, "nvim_exec_lua",
+                    "vim.cmd('enew!'); vim.cmd('normal! \"+P'); return vim.api.nvim_buf_line_count(0)", List.of()));
+            assertFalse(onMain(session::stopped));
+            assertEquals(2L, request(session, "nvim_eval", "1+1"));
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));
@@ -234,6 +255,12 @@ public final class EditorIntegrationTest {
             catch (Exception starting) { return false; }
         });
         await(() -> String.valueOf(request(session, "nvim_buf_get_name", 0)).endsWith("notes.txt"));
+    }
+
+    private static <T> T onMain(Supplier<T> supplier) {
+        AtomicReference<T> value = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> value.set(supplier.get()));
+        return value.get();
     }
 
     private static String screen(ActivityScenario<MainActivity> activity) {

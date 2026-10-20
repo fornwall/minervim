@@ -216,6 +216,8 @@ final class EditorSession implements NeovimView.Listener {
                     }
                     else setStatus(READY, true);
                 }));
+        // Later window focus changes come from the view.
+        if (target.hasWindowFocus()) request("nvim_ui_set_focus", true);
     }
 
     CompletableFuture<Object> request(String method, Object... args) {
@@ -302,6 +304,11 @@ final class EditorSession implements NeovimView.Listener {
     @Override
     public void mouse(String button, String action, String modifiers, int row, int col) {
         if (attached) request("nvim_input_mouse", button, action, modifiers, 0, row, col);
+    }
+
+    @Override
+    public void focus(boolean gained) {
+        if (attached) request("nvim_ui_set_focus", gained);
     }
 
     @Override

@@ -56,6 +56,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   for plain keys, so a composing keyboard does not hold back commands such as
   `dd`. On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, and right Alt
   is Alt on layouts without AltGr characters (US, ChromeOS).
+- `FocusGained` and `FocusLost` fire when the app window gains or loses input
+  focus, for example behind a dialog or when the app goes to the background.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to disable the writes. On the next start the

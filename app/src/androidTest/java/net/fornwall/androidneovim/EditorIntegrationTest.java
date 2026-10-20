@@ -2,6 +2,8 @@ package net.fornwall.androidneovim;
 
 import static org.junit.Assert.*;
 
+import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.os.Process;
@@ -172,6 +174,23 @@ public final class EditorIntegrationTest {
             });
             await(() -> List.of("  ab", "  jk", "  x", "").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
             assertEquals("i", ((Map<?, ?>) request(session, "nvim_get_mode")).get("mode"));
+        }
+    }
+
+    @Test
+    public void windowFocusChangesReachNeovim() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_exec_lua", "vim.g.focus = ''; vim.api.nvim_create_autocmd({'FocusLost', 'FocusGained'}, "
+                    + "{callback = function(event) vim.g.focus = vim.g.focus .. event.event:sub(6, 6) end})", List.of());
+            // A dialog takes window focus from the editor.
+            AtomicReference<Dialog> dialog = new AtomicReference<>();
+            activity.onActivity(a -> dialog.set(new AlertDialog.Builder(a).setMessage("Focus").show()));
+            await(() -> String.valueOf(request(session, "nvim_get_var", "focus")).endsWith("L"));
+            activity.onActivity(a -> dialog.get().dismiss());
+            await(() -> String.valueOf(request(session, "nvim_get_var", "focus")).endsWith("LG"));
         }
     }
 

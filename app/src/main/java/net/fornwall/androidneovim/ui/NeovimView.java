@@ -41,6 +41,8 @@ public final class NeovimView extends View {
         void paste(String text);
         void mouse(String button, String action, String modifiers, int row, int column);
         void resize(int columns, int rows);
+        /** The window gained or lost input focus. */
+        default void focus(boolean gained) { }
     }
     public interface ModifierListener { void onModifiersChanged(boolean ctrl, boolean alt); }
 
@@ -873,6 +875,11 @@ public final class NeovimView extends View {
         int ticks = Math.max(-32, Math.min(32, (int) amount));
         for (int i = 0; i < Math.abs(ticks); i++) listener.mouse("wheel", ticks > 0 ? positive : negative, modifiers, row, column);
         return amount - ticks;
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (listener != null) listener.focus(hasWindowFocus);
     }
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {

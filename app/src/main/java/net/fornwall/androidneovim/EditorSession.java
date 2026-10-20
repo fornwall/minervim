@@ -108,10 +108,12 @@ final class EditorSession implements NeovimView.Listener {
             File runtime = new File(home, "runtime");
             // Copy packaged runtime once per app update, before starting native code. A fresh tree
             // drops files that the update removed, and has no doc/tags, so init.lua regenerates them.
+            // The old tree goes first, so only one needs room; an interrupted copy repeats on the next start.
             long update = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).lastUpdateTime;
             File marker = new File(home, "runtime-version");
             if (!marker.isFile() || !Files.readString(marker.toPath()).equals(Long.toString(update))) {
-                FileTrees.replace(runtime, staging -> copyAsset("runtime", staging));
+                FileTrees.delete(runtime);
+                copyAsset("runtime", runtime);
                 Files.writeString(marker.toPath(), Long.toString(update));
             }
             // Neovim has not started, so no buffer holds a copy that is deleted now.

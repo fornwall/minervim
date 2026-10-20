@@ -169,7 +169,6 @@ public final class SystemIntegrationTest {
             assertEquals(List.of(false, true), request("nvim_exec_lua", "local stale = pcall(vim.cmd.help, 'stale-topic'); "
                     + "local current = pcall(vim.cmd.help, 'vim.ui.open()'); return {stale, current}", List.of()));
             assertEquals("help", request("nvim_get_option_value", "filetype", Map.of("buf", 0)));
-            assertFalse(new File(context.getFilesDir(), "runtime.tmp").exists());
         }
     }
 

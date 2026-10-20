@@ -156,7 +156,7 @@ Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
 lifecycle, including requests from Neovim, command ordering, resize coalescing
-and chunked paste, document change detection, and runtime tree replacement.
+and chunked paste, document change detection, and tree deletion.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter

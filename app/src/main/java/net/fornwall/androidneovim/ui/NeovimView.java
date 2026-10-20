@@ -31,7 +31,6 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.OverScroller;
 import android.widget.Toast;
-import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
 
@@ -54,7 +53,6 @@ public final class NeovimView extends View {
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     /** IME deletions, and the committed text they are counted over, are bounded to this many characters. */
     private static final int MAX_IME_DELETE = 256;
-    private static final int ADVANCE_BITS = 9;
     // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
     private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
     // The system theme picks Neovim's 'background', so frames before its colors arrive match it.
@@ -64,9 +62,8 @@ public final class NeovimView extends View {
     private final int[] maximumRun = new int[4];
     private final float[] textScales = new float[4];
     private final float[] advanceErrors = new float[4];
-    // Per-style advances of drawn clusters, direct-mapped by text and cleared when the font changes.
-    private final String[][] advanceKeys = new String[4][1 << ADVANCE_BITS];
-    private final float[][] advanceValues = new float[4][1 << ADVANCE_BITS];
+    // Per-style advances of drawn clusters, cleared when the font changes.
+    private final AdvanceCache[] advanceCaches = {new AdvanceCache(), new AdvanceCache(), new AdvanceCache(), new AdvanceCache()};
     private final Paint fill = new Paint();
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path curlPath = new Path();
@@ -200,7 +197,7 @@ public final class NeovimView extends View {
             for (float advance : advances) error = Math.max(error, Math.abs(advance - cellWidth));
             maximumRun[style] = error < 1e-4f ? Integer.MAX_VALUE : (int) (0.25f / error);
             advanceErrors[style] = Math.max(error, 1e-4f);
-            Arrays.fill(advanceKeys[style], null);
+            advanceCaches[style].clear();
         }
     }
 
@@ -431,12 +428,12 @@ public final class NeovimView extends View {
     }
 
     private float advance(int style, String text) {
-        int slot = (text.hashCode() * 0x9e3779b9) >>> (32 - ADVANCE_BITS);
-        if (!text.equals(advanceKeys[style][slot])) {
-            advanceKeys[style][slot] = text;
-            advanceValues[style][slot] = textPaints[style].getRunAdvance(text, 0, text.length(), 0, text.length(), false, text.length());
+        float advance = advanceCaches[style].get(text);
+        if (Float.isNaN(advance)) {
+            advance = textPaints[style].getRunAdvance(text, 0, text.length(), 0, text.length(), false, text.length());
+            advanceCaches[style].put(text, advance);
         }
-        return advanceValues[style][slot];
+        return advance;
     }
 
     public void setModifierListener(ModifierListener listener) { modifierListener = listener; }

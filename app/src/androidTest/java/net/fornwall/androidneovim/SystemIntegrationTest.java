@@ -6,6 +6,8 @@ import static org.junit.Assert.*;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -399,6 +401,27 @@ public final class SystemIntegrationTest {
             request("nvim_eval", "1");
             assertTrue(shada.isFile());
             assertFalse(file.exists());
+        }
+    }
+
+    @Test
+    public void plusRegisterKeepsNulCharacters() throws Exception {
+        ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            // A register line, as the clipboard provider sees it, represents NUL as "\n".
+            request("nvim_exec_lua", "vim.cmd.enew(); vim.api.nvim_buf_set_lines(0, 0, -1, true, {'a\\0b'}); "
+                    + "vim.cmd('normal! \"+yy')", List.of());
+            await(() -> {
+                AtomicReference<String> text = new AtomicReference<>();
+                InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                    ClipData data = clipboard.getPrimaryClip();
+                    text.set(data == null ? null : String.valueOf(data.getItemAt(0).getText()));
+                });
+                return text.get() != null && text.get().startsWith("a\u0000b");
+            });
+            request("nvim_command", "normal! \"+p");
+            assertEquals(List.of("a\u0000b", "a\u0000b"), request("nvim_buf_get_lines", 0, 0, -1, true));
         }
     }
 

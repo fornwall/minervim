@@ -37,9 +37,10 @@ try(vim.cmd, 'syntax enable')
 
 -- The + and * registers use Android's clipboard through the UI channel; no clipboard tool runs.
 -- Text crosses as one string, so the number of lines is not limited by the RPC message size.
+-- Neovim gives a NUL in a line as "\n"; it crosses as NUL, so only line breaks are "\n".
 local clipboard_limit = 512 * 1024
 local function copy(lines, regtype)
-  local text = table.concat(lines, '\n')
+  local text = table.concat(vim.tbl_map(function(line) return (line:gsub('\n', '\0')) end, lines), '\n')
   if vim.str_utfindex(text, 'utf-16') > clipboard_limit then
     vim.notify('Selection exceeds the 512 Ki character Android clipboard limit', vim.log.levels.WARN)
     return
@@ -48,7 +49,9 @@ local function copy(lines, regtype)
 end
 local function paste()
   local text, regtype = unpack(vim.rpcrequest(channel, 'android_clipboard_get'))
-  return { vim.split(text, '\n', { plain = true }), regtype }
+  local lines = vim.split(text, '\n', { plain = true })
+  for i, line in ipairs(lines) do lines[i] = line:gsub('%z', '\n') end
+  return { lines, regtype }
 end
 if vim.g.clipboard == nil then
   vim.g.clipboard = { name = 'android', copy = { ['+'] = copy, ['*'] = copy },

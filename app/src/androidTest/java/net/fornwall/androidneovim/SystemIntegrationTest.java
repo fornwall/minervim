@@ -206,7 +206,7 @@ public final class SystemIntegrationTest {
                     started.stream().map(intent -> intent.getData().toString()).toList());
             assertEquals(List.of(true, true), request("nvim_exec_lua", "local cmd, err = vim.ui.open('notes.txt'); "
                     + "return {cmd == nil, err:find('not files', 1, true) ~= nil}", List.of()));
-            // Without a view, as while an Activity is recreated, the URL opens in a new task.
+            // Without a view, as after the Activity finished, the URL opens in a new task.
             activity.onActivity(a -> session.detach(a.editorView(), false));
             request("nvim_exec_lua", "vim.ui.open('https://example.com/detached')", List.of());
             await(() -> started.size() == 4);

@@ -64,8 +64,10 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - The soft keyboard's Enter is `<CR>`, and multi-line text it commits (clipboard
   suggestions, dictation) is pasted rather than typed, so mappings and
   autoindent do not apply to it. Text still being composed is sent before
-  another key, a tap, a sticky modifier, or focus loss. Outside Insert and
-  command-line modes the keyboard is asked for plain keys, so a composing
+  another key (Back's `<Esc>` too), a tap or a sticky modifier, and on focus
+  loss or Activity recreation. Only text composed before a mode change that
+  Neovim made by itself is dropped when the keyboard restarts. Outside Insert
+  and command-line modes the keyboard is asked for plain keys, so a composing
   keyboard does not hold back commands such as `dd`. Replace mode and `r` take
   plain keys too, so CJK keyboards cannot compose there. Android drops what a
   keyboard sends while it restarts, so the switch waits until the keyboard has
@@ -151,8 +153,8 @@ IME surrounding-text behavior are future work.
 - `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure. A
   message that cannot be encoded, or a failing notification handler, affects only
   that message.
-- `ui/`: UI-owned grid, complete-frame publication on Neovim `flush`, drawing,
-  Android input, and basic accessibility.
+- `ui/`: the session's grid, which only the UI thread touches, complete-frame
+  publication on Neovim `flush`, drawing, Android input, and basic accessibility.
 
 The view learns from `android-ssh`'s terminal rendering/input design, but does not
 depend on `TerminalSession`, `libterm`, terminal modes, or scrollback.

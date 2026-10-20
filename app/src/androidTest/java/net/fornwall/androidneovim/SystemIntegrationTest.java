@@ -366,6 +366,25 @@ public final class SystemIntegrationTest {
         }
     }
 
+    @Test
+    public void openingAFileIgnoresWildignoreAndKeepsTheArgumentList() throws Exception {
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            File lock = new File(context.getFilesDir(), "yarn.lock");
+            Files.writeString(lock.toPath(), "lockfile\n");
+            File script = new File(context.getFilesDir(), "script.lua");
+            Files.writeString(script.toPath(), "return 1\n");
+            request("nvim_exec_lua", "vim.o.wildignore = '*.lock'; vim.cmd.args(vim.fn.fnameescape(...))",
+                    List.of(script.getAbsolutePath()));
+            session.edit(lock).get(10, TimeUnit.SECONDS);
+            assertEquals(List.of("lockfile"), request("nvim_buf_get_lines", 0, 0, -1, true));
+            session.edit(script).get(10, TimeUnit.SECONDS);
+            // Loaded as :edit would, with filetype detection, and listed.
+            assertEquals(List.of("lua", true, 1L), request("nvim_exec_lua",
+                    "return {vim.bo.filetype, vim.bo.buflisted, vim.fn.argc()}", List.of()));
+        }
+    }
+
     private void save(File file, String line) throws Exception {
         request("nvim_exec_lua", "local path, line = ...; vim.cmd.edit(vim.fn.fnameescape(path)); "
                 + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {line}); vim.cmd.write()", List.of(file.getAbsolutePath(), line));

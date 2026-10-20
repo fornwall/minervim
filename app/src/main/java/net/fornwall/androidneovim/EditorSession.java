@@ -322,12 +322,13 @@ final class EditorSession implements NeovimView.Listener {
     String status() { return status; }
 
     /**
-     * Opens a file once the editor has started; callbacks run on the main thread. Unlike :edit, :drop
-     * shows a loaded buffer as it is, so reopening a document with unsaved changes keeps them (no E37).
+     * Opens a file once the editor has started; callbacks run on the main thread. Like :buffer, a loaded
+     * buffer is shown as it is, so reopening a document with unsaved changes keeps them (no E37). Unlike
+     * :edit and :drop, no file pattern is expanded, so 'wildignore' and the argument list do not apply.
      */
     CompletableFuture<Object> edit(File file) {
-        return ready.thenComposeAsync(ignored -> request("nvim_exec_lua", "vim.cmd.drop(vim.fn.fnameescape(...))",
-                List.of(file.getAbsolutePath())), main::post);
+        return ready.thenComposeAsync(ignored -> request("nvim_exec_lua", "local buf = vim.fn.bufadd(...); "
+                + "vim.bo[buf].buflisted = true; vim.api.nvim_set_current_buf(buf)", List.of(file.getAbsolutePath())), main::post);
     }
 
     /** Android may end a stopped app without notice; save what Neovim can save first. */

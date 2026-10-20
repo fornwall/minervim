@@ -11,6 +11,7 @@ import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Looper;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.HapticFeedbackConstants;
@@ -53,6 +54,8 @@ public final class NeovimView extends View {
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     /** IME deletions, and the committed text they are counted over, are bounded to this many characters. */
     private static final int MAX_IME_DELETE = 256;
+    // Mode changes restart the IME only after it has been idle this long: Android drops what it sends meanwhile.
+    private static final long IME_IDLE_MS = 150;
     // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
     private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
     private final NeovimGrid grid;
@@ -86,6 +89,9 @@ public final class NeovimView extends View {
     private int rows;
     private int connectionGeneration;
     private boolean textEntry;
+    private boolean modeRestartPending, composedForNewMode;
+    private long imeActivity;
+    private final Runnable modeRestart = this::restartForMode;
     private int pendingAccent;
     private final BitSet handledKeys = new BitSet();
     private String composition = "";
@@ -550,13 +556,41 @@ public final class NeovimView extends View {
         };
     }
 
-    /** Restarts the IME when the flushed mode starts or stops editing text. */
+    /** Restarts the IME when the flushed mode starts or stops editing text, once the IME is idle. */
     private void updateInputMode() {
+        if (editsText(grid.frame().mode) == textEntry) {
+            removeCallbacks(modeRestart);
+            modeRestartPending = false;
+        } else if (!modeRestartPending) {
+            modeRestartPending = true;
+            composedForNewMode = false;
+            restartForMode();
+        }
+    }
+
+    /**
+     * A restart replaces the IME's connection, and Android drops what the IME still sends to the old one,
+     * such as the h of a quickly typed oh. So the restart waits until no connection was used for IME_IDLE_MS.
+     */
+    private void restartForMode() {
+        long idle = SystemClock.uptimeMillis() - imeActivity;
+        if (idle < IME_IDLE_MS) {
+            postDelayed(modeRestart, IME_IDLE_MS - idle);
+            return;
+        }
+        modeRestartPending = false;
         boolean text = editsText(grid.frame().mode);
         if (text == textEntry) return;
+        // Text composed since the mode changed was typed for the new mode, so it is sent rather than dropped.
+        if (!composition.isEmpty() && composedForNewMode && listener != null) {
+            listener.input(KeyNotation.literal(composition));
+        }
         textEntry = text;
         resetIme();
     }
+
+    /** Whether the IME is asked for text rather than plain keys. */
+    boolean textInput() { return textEntry; }
 
     @Override public InputConnection onCreateInputConnection(EditorInfo info) {
         // Outside text entry, TYPE_NULL asks for plain keys, so a composing keyboard does not hold back commands.
@@ -571,13 +605,17 @@ public final class NeovimView extends View {
             private boolean closed;
             /** The end of what this connection committed, to count deletions in code points rather than units. */
             private final StringBuilder committed = new StringBuilder();
-            // A connection replaced by restartInput still delivers text and keys typed during the restart, but
-            // only the current one composes. Closed connections and a detached view deliver nothing.
-            private boolean active() { return !closed && isAttachedToWindow(); }
-            private boolean current() { return active() && generation == connectionGeneration; }
+            /**
+             * Records IME activity, which delays mode restarts, and returns whether this connection may act: it is
+             * open, the view is attached, and no restart or focus loss has replaced it since it was created.
+             */
+            private boolean active() {
+                imeActivity = SystemClock.uptimeMillis();
+                return !closed && generation == connectionGeneration && isAttachedToWindow();
+            }
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
-                if (current()) composition = "";
+                composition = "";
                 if (text != null && text.length() > 0) {
                     commitIme(text.toString());
                     committed.append(text);
@@ -587,7 +625,7 @@ public final class NeovimView extends View {
                 return true;
             }
             @Override public boolean setComposingText(CharSequence text, int newCursorPosition) {
-                if (!current()) return false;
+                if (!active()) return false;
                 // Soft keyboards often compose single letters; a sticky modifier makes one a key now.
                 if ((stickyCtrl || stickyAlt) && composition.isEmpty() && text != null && text.length() > 0
                         && Character.codePointCount(text, 0, text.length()) == 1) {
@@ -595,17 +633,19 @@ public final class NeovimView extends View {
                     resetIme();
                     return true;
                 }
-                composition = text == null ? "" : text.subSequence(0, Math.min(4096, text.length())).toString();
+                String next = text == null ? "" : text.subSequence(0, Math.min(4096, text.length())).toString();
+                if (composition.isEmpty() && !next.isEmpty()) composedForNewMode = modeRestartPending;
+                composition = next;
                 invalidate();
                 return true;
             }
             @Override public boolean finishComposingText() {
-                if (!current()) return false;
+                if (!active()) return false;
                 return commitText(composition, 1);
             }
             @Override public boolean deleteSurroundingText(int before, int after) {
                 if (!active()) return false;
-                if (current() && !composition.isEmpty()) return delete(before, after);
+                if (!composition.isEmpty()) return delete(before, after);
                 // Keyboards delete an emoji as two UTF-16 units, but Neovim deletes one character per <BS>.
                 int codePoints = 0;
                 for (int units = before; units > 0 && codePoints < MAX_IME_DELETE; codePoints++) units -= Math.max(1, forgetCodePoint());
@@ -613,7 +653,7 @@ public final class NeovimView extends View {
             }
             @Override public boolean deleteSurroundingTextInCodePoints(int before, int after) {
                 if (!active()) return false;
-                if (!current() || composition.isEmpty()) for (int i = 0; i < Math.min(before, MAX_IME_DELETE); i++) forgetCodePoint();
+                if (composition.isEmpty()) for (int i = 0; i < Math.min(before, MAX_IME_DELETE); i++) forgetCodePoint();
                 return delete(before, after);
             }
             /** Removes the last committed code point and returns its length in UTF-16 units, or 0 if none is known. */
@@ -625,7 +665,7 @@ public final class NeovimView extends View {
             }
             /** Deletes code points from the composition if there is one, otherwise around Neovim's cursor. */
             private boolean delete(int before, int after) {
-                if (current() && !composition.isEmpty()) {
+                if (!composition.isEmpty()) {
                     int count = composition.codePointCount(0, composition.length());
                     composition = composition.substring(0, composition.offsetByCodePoints(0, Math.max(0, count - Math.max(0, before))));
                     invalidate();
@@ -636,11 +676,14 @@ public final class NeovimView extends View {
                 return true;
             }
             @Override public CharSequence getTextBeforeCursor(int length, int flags) {
-                if (!current()) return "";
+                if (!active()) return null;
                 return composition.substring(Math.max(0, composition.length() - Math.max(0, length)));
             }
-            @Override public CharSequence getTextAfterCursor(int length, int flags) { return ""; }
-            @Override public CharSequence getSelectedText(int flags) { return ""; }
+            @Override public CharSequence getTextAfterCursor(int length, int flags) { return active() ? "" : null; }
+            @Override public CharSequence getSelectedText(int flags) { return active() ? "" : null; }
+            // An IME brackets the edits for one key in a batch; its start is activity as well.
+            @Override public boolean beginBatchEdit() { active(); return false; }
+            @Override public boolean endBatchEdit() { active(); return false; }
             @Override public boolean sendKeyEvent(KeyEvent event) { return active() && dispatchKeyEvent(event); }
             @Override public boolean performEditorAction(int action) {
                 if (!active()) return false;

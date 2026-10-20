@@ -56,10 +56,22 @@ public class NeovimViewTest {
         @Override public void resize(int columns, int rows) { sizes.add(columns + "x" + rows); }
     }
 
-    private interface AttachedTest { void run(Activity activity, NeovimView view, InputLog input); }
+    private interface AttachedTest { void run(Activity activity, NeovimView view, InputLog input) throws Exception; }
 
     /** Runs {@code test} on the main thread with a focused view in a started activity, then detaches it. */
     private static void attached(AttachedTest test) {
+        try {
+            attachedOnTestThread((activity, view, input) -> main(() -> {
+                try { test.run(activity, view, input); }
+                catch (Exception e) { throw new AssertionError(e); }
+            }));
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /** Like {@link #attached}, but {@code test} runs on the test thread and uses {@link #main} for the view. */
+    private static void attachedOnTestThread(AttachedTest test) throws Exception {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -69,17 +81,33 @@ public class NeovimViewTest {
             for (long deadline = SystemClock.uptimeMillis() + 5000; !activity.hasWindowFocus() && SystemClock.uptimeMillis() < deadline; ) {
                 SystemClock.sleep(20);
             }
-            instrumentation.runOnMainSync(() -> {
-                NeovimView view = new NeovimView(activity);
-                InputLog input = new InputLog();
-                activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));
-                view.setListener(input);
-                view.requestFocus();
-                test.run(activity, view, input);
-                if (view.getParent() != null) ((ViewGroup) view.getParent()).removeView(view);
+            NeovimView[] view = new NeovimView[1];
+            InputLog input = new InputLog();
+            main(() -> {
+                view[0] = new NeovimView(activity);
+                activity.addContentView(view[0], new ViewGroup.LayoutParams(200, 200));
+                view[0].setListener(input);
+                view[0].requestFocus();
             });
+            try {
+                test.run(activity, view[0], input);
+            } finally {
+                main(() -> { if (view[0].getParent() != null) ((ViewGroup) view[0].getParent()).removeView(view[0]); });
+            }
         } finally {
-            instrumentation.runOnMainSync(activity::finish);
+            main(activity::finish);
+        }
+    }
+
+    private static void main(Runnable action) { InstrumentationRegistry.getInstrumentation().runOnMainSync(action); }
+
+    /** Waits for a mode restart, which waits for the IME (including the device's own keyboard) to be idle. */
+    private static void awaitTextInput(NeovimView view, boolean text) {
+        boolean[] current = new boolean[1];
+        for (long deadline = SystemClock.uptimeMillis() + 5000; ; SystemClock.sleep(20)) {
+            main(() -> current[0] = view.textInput());
+            if (current[0] == text) return;
+            assertTrue("The IME was not restarted", SystemClock.uptimeMillis() < deadline);
         }
     }
 
@@ -300,9 +328,9 @@ public class NeovimViewTest {
                 view.toggleAlt();
                 assertTrue(connection.commitText("<", 1));
                 view.toggleCtrl();
-                // A composed letter becomes the modified key immediately, and the replaced connection stops composing.
+                // A composed letter becomes the modified key immediately, and the stale connection closes.
                 assertTrue(connection.setComposingText("d", 1));
-                assertFalse(connection.setComposingText("d", 1));
+                assertFalse(connection.commitText("d", 1));
                 connection = view.onCreateInputConnection(new EditorInfo());
                 view.toggleCtrl();
                 ((ViewGroup) view.getParent()).removeView(view);
@@ -332,7 +360,7 @@ public class NeovimViewTest {
         });
     }
 
-    @Test public void imeCompositionStaysLocalAndOnlyTheCurrentConnectionComposes() {
+    @Test public void imeCompositionStaysLocalAndOldConnectionsCannotSend() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -350,14 +378,10 @@ public class NeovimViewTest {
                 assertTrue(first.commitText("a<b", 1));
                 assertEquals(List.of("a<LT>b"), input.keys);
                 InputConnection second = view.onCreateInputConnection(new EditorInfo());
-                // Text typed while the IME restarts still arrives; closed connections send nothing.
-                assertFalse(first.setComposingText("stale", 1));
-                assertTrue(first.commitText("late", 1));
-                first.closeConnection();
-                assertFalse(first.commitText("closed", 1));
+                assertFalse(first.commitText("stale", 1));
                 assertTrue(second.setComposingText("文", 1));
                 assertTrue(second.finishComposingText());
-                assertEquals(List.of("a<LT>b", "late", "文"), input.keys);
+                assertEquals(List.of("a<LT>b", "文"), input.keys);
                 ((ViewGroup) view.getParent()).removeView(view);
                 assertFalse(second.commitText("detached", 1));
             });
@@ -697,28 +721,75 @@ public class NeovimViewTest {
                 Map.of("name", "cmdline_normal")))), List.of("mode_change", List.of(name, index)), List.of("flush", List.of()));
     }
 
-    @Test public void imeComposesOnlyInTextEntryModes() {
-        attached((activity, view, input) -> {
+    private static int inputType(NeovimView view) {
+        EditorInfo info = new EditorInfo();
+        main(() -> view.onCreateInputConnection(info));
+        return info.inputType;
+    }
+
+    @Test public void imeComposesOnlyInTextEntryModes() throws Exception {
+        attachedOnTestThread((activity, view, input) -> {
             EditorInfo info = new EditorInfo();
-            InputConnection normal = view.onCreateInputConnection(info);
+            main(() -> view.onCreateInputConnection(info));
             assertEquals(InputType.TYPE_NULL, info.inputType);
             assertTrue((info.imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0);
-            view.handleRedraw(mode("normal", 0));
-            view.onCreateInputConnection(info = new EditorInfo());
-            assertEquals(InputType.TYPE_NULL, info.inputType);
-            // Entering Insert mode restarts the IME: the previous connection still commits but no longer composes.
-            view.handleRedraw(mode("insert", 1));
-            assertFalse(normal.setComposingText("x", 1));
-            assertTrue(normal.commitText("y", 1));
-            view.onCreateInputConnection(info = new EditorInfo());
-            assertEquals(InputType.TYPE_CLASS_TEXT, info.inputType & InputType.TYPE_MASK_CLASS);
-            view.handleRedraw(mode("cmdline_normal", 2));
-            view.onCreateInputConnection(info = new EditorInfo());
-            assertEquals(InputType.TYPE_CLASS_TEXT, info.inputType & InputType.TYPE_MASK_CLASS);
-            view.handleRedraw(mode("normal", 0));
-            view.onCreateInputConnection(info = new EditorInfo());
-            assertEquals(InputType.TYPE_NULL, info.inputType);
-            assertEquals(List.of("y"), input.keys);
+            main(() -> view.handleRedraw(mode("normal", 0)));
+            assertEquals(InputType.TYPE_NULL, inputType(view));
+            main(() -> view.handleRedraw(mode("insert", 1)));
+            awaitTextInput(view, true);
+            assertEquals(InputType.TYPE_CLASS_TEXT, inputType(view) & InputType.TYPE_MASK_CLASS);
+            main(() -> view.handleRedraw(mode("cmdline_normal", 2)));
+            assertEquals(InputType.TYPE_CLASS_TEXT, inputType(view) & InputType.TYPE_MASK_CLASS);
+            main(() -> view.handleRedraw(mode("normal", 0)));
+            awaitTextInput(view, false);
+            assertEquals(InputType.TYPE_NULL, inputType(view));
+            assertTrue(input.keys.isEmpty());
+        });
+    }
+
+    @Test public void modeRestartsWaitWhileTheImeTypes() throws Exception {
+        attachedOnTestThread((activity, view, input) -> {
+            InputConnection[] connection = new InputConnection[1];
+            main(() -> {
+                connection[0] = view.onCreateInputConnection(new EditorInfo());
+                // The o of a quickly typed "oh" enters Insert mode. Android would drop the h if the
+                // restart replaced the connection first.
+                assertTrue(connection[0].commitText("o", 1));
+                view.handleRedraw(mode("insert", 1));
+            });
+            for (String key : List.of("h", "e", "y")) {
+                SystemClock.sleep(50);
+                main(() -> assertTrue(connection[0].commitText(key, 1)));
+            }
+            awaitTextInput(view, true);
+            main(() -> assertFalse(connection[0].commitText("x", 1)));
+            assertEquals(List.of("o", "h", "e", "y"), input.keys);
+        });
+    }
+
+    @Test public void textComposedForTheNewModeIsSentWhenTheImeRestarts() throws Exception {
+        attachedOnTestThread((activity, view, input) -> {
+            InputConnection[] connection = new InputConnection[1];
+            main(() -> view.handleRedraw(mode("insert", 1)));
+            awaitTextInput(view, true);
+            // Composed in Insert mode, which Neovim then left by itself: text, not commands.
+            main(() -> {
+                connection[0] = view.onCreateInputConnection(new EditorInfo());
+                assertTrue(connection[0].setComposingText("ab", 1));
+                view.handleRedraw(mode("normal", 0));
+            });
+            awaitTextInput(view, false);
+            main(() -> view.handleRedraw(mode("insert", 1)));
+            awaitTextInput(view, true);
+            // Composed after Neovim returned to Normal mode, before the IME restarted: Normal-mode commands.
+            main(() -> {
+                connection[0] = view.onCreateInputConnection(new EditorInfo());
+                assertTrue(connection[0].commitText("x", 1));
+                view.handleRedraw(mode("normal", 0));
+                assertTrue(connection[0].setComposingText("dd", 1));
+            });
+            awaitTextInput(view, false);
+            assertEquals(List.of("x", "dd"), input.keys);
         });
     }
 

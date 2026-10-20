@@ -66,7 +66,9 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   autoindent do not apply to it. Text still being composed is sent before
   another key, a tap, a sticky modifier, or focus loss. Outside Insert, Replace
   and command-line modes the keyboard is asked for plain keys, so a composing
-  keyboard does not hold back commands such as `dd`.
+  keyboard does not hold back commands such as `dd`. Android drops what a
+  keyboard sends while it restarts, so the switch waits until the keyboard has
+  been idle for 150 ms; a key typed at that very moment can still be lost.
 - On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys are
   `<k0>`–`<k9>`, `<kPlus>`, `<kEnter>` and so on (their characters unless
   mapped), and right Alt is Alt on layouts without AltGr characters (US,

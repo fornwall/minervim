@@ -113,7 +113,7 @@ IME surrounding-text behavior are future work.
   runtime extraction, UI attachment, and clipboard. `EditorCommands` orders
   requests after earlier input and retries input byte-exactly. Neovim defers most
   requests while it waits at a prompt or for a pending key, so a sent request never
-  holds back later input.
+  holds back later input. Unsent UI resizes coalesce.
   Android integration Lua lives in `app/src/main/assets/android/init.lua`.
 - `Documents`: local copies of Android documents and write-back to originals.
 - `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure.
@@ -133,7 +133,8 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
-lifecycle, including requests from Neovim, and command ordering.
+lifecycle, including requests from Neovim, and command ordering and resize
+coalescing.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter

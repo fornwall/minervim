@@ -38,6 +38,9 @@ final class EditorCommands {
     private final ArrayDeque<Operation> queue = new ArrayDeque<>();
     /** Sent requests awaiting a reply. */
     private final Set<Operation> sent = new LinkedHashSet<>();
+    /** At most one resize is sent at a time; later sizes replace the unsent one. */
+    private Operation resizing;
+    private Operation nextResize;
     private boolean inputting;
     /** Requests were sent since the last probe that later input must not overtake. */
     private boolean unordered;
@@ -64,9 +67,13 @@ final class EditorCommands {
         return enqueue(new Operation(bytes));
     }
 
-    /** Sent once all earlier input is accepted. */
+    /** Sent once earlier input is accepted. Unsent resizes share one request with the latest size. */
     CompletableFuture<Object> request(String method, Object... arguments) {
-        return enqueue(new Operation(Objects.requireNonNull(method), arguments.clone()));
+        Objects.requireNonNull(method);
+        Operation resize = closed == null && method.equals(RESIZE) ? unsentResize() : null;
+        if (resize == null) return enqueue(new Operation(method, arguments.clone()));
+        resize.arguments = arguments.clone();
+        return resize.result;
     }
 
     void close(Throwable cause) {
@@ -74,10 +81,18 @@ final class EditorCommands {
         closed = Objects.requireNonNull(cause);
         List<Operation> pending = new ArrayList<>(queue);
         pending.addAll(sent);
+        if (nextResize != null) pending.add(nextResize);
         queue.clear();
         sent.clear();
+        resizing = nextResize = null;
         inputBytes = 0;
         for (Operation operation : pending) operation.result.completeExceptionally(cause);
+    }
+
+    private Operation unsentResize() {
+        if (nextResize != null) return nextResize;
+        for (Operation operation : queue) if (RESIZE.equals(operation.method)) return operation;
+        return null;
     }
 
     private CompletableFuture<Object> enqueue(Operation operation) {
@@ -97,8 +112,11 @@ final class EditorCommands {
         while (closed == null && !inputting && !probing) {
             Operation next = queue.peek();
             if (next == null) return;
-            if (next.input == null) sendRequest(queue.remove());
-            else if (unordered) probe();
+            if (next.input == null) {
+                queue.remove();
+                if (next.method.equals(RESIZE) && resizing != null) nextResize = next;
+                else sendRequest(next);
+            } else if (unordered) probe();
             else {
                 inputting = true;
                 send(next);
@@ -121,13 +139,26 @@ final class EditorCommands {
 
     private void sendRequest(Operation operation) {
         if (!UNORDERED.contains(operation.method)) unordered = true;
+        if (operation.method.equals(RESIZE)) resizing = operation;
+        // An attach carries the current size, which supersedes an older resize.
+        if (operation.method.equals("nvim_ui_attach") && nextResize != null) {
+            nextResize.result.complete(null);
+            nextResize = null;
+        }
         sent.add(operation);
         call(operation.method, operation.arguments)
                 .whenCompleteAsync((result, error) -> answered(operation, result, error), callbacks);
     }
 
     private void answered(Operation operation, Object result, Throwable error) {
-        if (sent.remove(operation)) complete(operation, result, error);
+        if (!sent.remove(operation)) return;
+        if (operation == resizing) {
+            resizing = null;
+            Operation next = nextResize;
+            nextResize = null;
+            if (next != null) sendRequest(next);
+        }
+        complete(operation, result, error);
     }
 
     private void send(Operation operation) {
@@ -178,7 +209,7 @@ final class EditorCommands {
 
     private static final class Operation {
         final String method;
-        final Object[] arguments;
+        Object[] arguments;
         final byte[] input;
         final CompletableFuture<Object> result = new CompletableFuture<>();
         int offset;

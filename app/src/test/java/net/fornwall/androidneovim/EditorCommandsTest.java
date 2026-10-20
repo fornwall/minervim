@@ -94,6 +94,40 @@ public class EditorCommandsTest {
                 "nvim_ui_try_resize", "nvim_input"), fake.methods);
     }
 
+    @Test public void resizesCoalesceToTheLatestSize() {
+        Fake fake = new Fake();
+        fake.commands.request("nvim_ui_try_resize", 80, 24);
+        CompletableFuture<Object> last = null;
+        for (int i = 1; i <= 50; i++) last = fake.commands.request("nvim_ui_try_resize", 80 + i, 24);
+        assertEquals(List.of("nvim_ui_try_resize"), fake.methods);
+        fake.reply(null);
+        assertEquals(List.of("nvim_ui_try_resize", "nvim_ui_try_resize"), fake.methods);
+        assertArrayEquals(new Object[]{130, 24}, fake.arguments.get(1));
+        fake.reply(null);
+        assertTrue(last.isDone());
+
+        // Queued behind input, too.
+        fake.commands.input("i");
+        for (int i = 1; i <= 50; i++) last = fake.commands.request("nvim_ui_try_resize", 40, 10 + i);
+        fake.reply(1L);
+        assertEquals("nvim_ui_try_resize", fake.methods.get(3));
+        assertArrayEquals(new Object[]{40, 60}, fake.arguments.get(3));
+        assertEquals(4, fake.methods.size());
+        fake.reply(null);
+        assertTrue(last.isDone());
+    }
+
+    @Test public void attachSupersedesAnUnsentResize() {
+        Fake fake = new Fake();
+        fake.commands.request("nvim_ui_try_resize", 80, 24);
+        CompletableFuture<Object> stale = fake.commands.request("nvim_ui_try_resize", 81, 24);
+        fake.commands.request("nvim_ui_detach");
+        fake.commands.request("nvim_ui_attach", 40, 60, Map.of());
+        assertNull(stale.join());
+        fake.reply(null);
+        assertEquals(List.of("nvim_ui_try_resize", "nvim_ui_detach", "nvim_ui_attach"), fake.methods);
+    }
+
     @Test public void partialUtf8IsRetriedAsExactBytesBeforeNextCommand() {
         Fake fake = new Fake();
         byte[] bytes = "é世".getBytes(StandardCharsets.UTF_8);
@@ -160,6 +194,7 @@ public class EditorCommandsTest {
     @Test public void closeFailsSentRequests() {
         Fake fake = new Fake();
         CompletableFuture<Object> command = fake.commands.request("nvim_command", "write");
+        fake.commands.request("nvim_ui_try_resize", 1, 1);
         CompletableFuture<Object> resize = fake.commands.request("nvim_ui_try_resize", 2, 2);
         fake.commands.close(new IOException("Disconnected"));
         assertTrue(command.isCompletedExceptionally());

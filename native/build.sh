@@ -40,7 +40,7 @@ for abi in "$@"; do
   deps="$out/ndk30-$abi-deps"
   build="$out/ndk30-$abi"
   android_args=(-DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-37)
-  cmake -S "$source/cmake.deps" -B "$deps" -G Ninja "${android_args[@]}" -DUSE_BUNDLED_TS_PARSERS=OFF
+  cmake -S "$source/cmake.deps" -B "$deps" -G Ninja "${android_args[@]}" -DUSE_BUNDLED_TS_PARSERS=ON
   cmake --build "$deps" -j "$jobs"
   cmake -S "$source" -B "$build" -G Ninja "${android_args[@]}" \
     -DCMAKE_BUILD_TYPE=Release -DDEPS_PREFIX="$deps/usr" -DCMAKE_FIND_ROOT_PATH="$deps/usr" \

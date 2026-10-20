@@ -98,6 +98,25 @@ public final class EditorIntegrationTest {
             assertEquals(2L, request(session, "nvim_eval", "exists(':Tutor')"));
             assertEquals(context.getFilesDir().getCanonicalPath(), request(session, "nvim_call_function", "getcwd", List.of()));
 
+            // Bundled Tree-sitter parsers load from libneovim.so, and the upstream ftplugins use them.
+            // Injections resolve built-in parsers that nothing has loaded yet.
+            assertEquals(List.of(true, true, true), request(session, "nvim_exec_lua", "vim.cmd('enew!'); "
+                    + "assert(not vim._ts_has_language('markdown_inline')); "
+                    + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {'# Notes', '', '```lua', 'local x = 1', '```', '', 'Some *text*.'}); "
+                    + "vim.bo.filetype = 'markdown'; local parser = vim.treesitter.get_parser(0); parser:parse(true); "
+                    + "return {vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()] ~= nil, "
+                    + "parser:children().lua ~= nil, parser:children().markdown_inline ~= nil}", List.of()));
+            List<String> parsers = List.of("c", "lua", "markdown", "markdown_inline", "query", "vim", "vimdoc");
+            assertEquals(parsers, request(session, "nvim_exec_lua", "return vim.tbl_filter(function(lang) "
+                    + "return vim.treesitter.language.add(lang) == true end, {...})", parsers));
+            assertEquals(List.of(true, true), request(session, "nvim_exec_lua",
+                    "local ok, res = pcall(vim.treesitter.language.add, 'nonexistent'); return {ok, res == nil}", List.of()));
+            request(session, "nvim_command", "help");
+            assertEquals(List.of(true, 1L), request(session, "nvim_exec_lua",
+                    "return {vim.treesitter.highlighter.active[vim.api.nvim_get_current_buf()] ~= nil, "
+                            + "vim.fn.maparg('gO', 'n', false, true).buffer}", List.of()));
+            request(session, "nvim_command", "bwipeout!");
+
             // The + register is Android's clipboard in both directions, without a clipboard tool process.
             ClipboardManager clipboard = context.getSystemService(ClipboardManager.class);
             request(session, "nvim_exec_lua", "vim.fn.setreg('+', {'yanked', 'lines'}, 'V')", List.of());

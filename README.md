@@ -6,7 +6,7 @@ one application process: Neovim owns a native thread, and a dedicated Android
 
 ## Build
 
-Requires Linux x86-64, JDK 25, CMake, Ninja, Make, a host C compiler, Python 3,
+Requires Linux x86-64, JDK 25, CMake 3.24+, Ninja, Make, a host C compiler, Python 3,
 curl, and the Android SDK. Install these pinned SDK components:
 
 ```sh
@@ -60,6 +60,11 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   `linebreak`, `undofile`, ...) apply only to options the configuration did not
   set. There is no plugin installer; plugins can be copied under
   `files/config/nvim/pack/`.
+- Neovim's bundled Tree-sitter parsers (C, Lua, Markdown, query, Vimscript and
+  Vim help) are linked into `libneovim.so`, so help and Markdown buffers get
+  Tree-sitter highlighting and the `gO` outline. A `parser/<lang>.so` on the
+  runtimepath is still tried first. Other parsers cannot be installed:
+  `:TSInstall` needs a compiler and subprocesses.
 
 This is an embedding prototype. `:qa` stops the editor thread without exiting
 Android. Neovim's global state is not reinitialized in-process, so **Restart**
@@ -79,9 +84,7 @@ ASCII in runs per highlight, scaled to the cell grid; wide and other non-ASCII
 glyphs are drawn per cell. Cross-cell ligatures, cached row rendering, rich
 accessibility navigation, and full IME surrounding-text behavior are future work.
 Undercurl renders as a wave; other underline variants render as a simple
-underline. Native Tree-sitter parser modules are not bundled; the help, Lua,
-Markdown and query filetype plugins fall back to their traditional Vimscript
-behavior when no parser is available.
+underline.
 
 ## Architecture
 
@@ -109,7 +112,8 @@ JVM tests cover grid update semantics, MessagePack limits and RPC lifecycle,
 including requests from Neovim.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
-same-process execution, rejected subprocesses, runtime plugins, clipboard
+same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
+parsers and their ftplugins, clipboard
 round-trips, background saves, and editor shutdown. UI tests
 also cover hardware key notation, sticky modifiers, IME lifecycle, touch gestures,
 and accessibility.

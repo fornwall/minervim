@@ -4,7 +4,9 @@ import pathlib
 import shutil
 import sys
 source, destination, neovim = map(pathlib.Path, sys.argv[1:])
-for name in ('libuv', 'luajit', 'luv', 'lua_compat53', 'lpeg', 'treesitter', 'unibilium', 'utf8proc'):
+for name in ('libuv', 'luajit', 'luv', 'lua_compat53', 'lpeg', 'treesitter', 'treesitter_c',
+             'treesitter_lua', 'treesitter_markdown', 'treesitter_query', 'treesitter_vim',
+             'treesitter_vimdoc', 'unibilium', 'utf8proc'):
     project = source / name
     notices = [p for p in project.iterdir() if p.is_file() and p.name.lower().startswith(('license', 'copying', 'copyright'))]
     # LPeg distributes its permission notice in its README.

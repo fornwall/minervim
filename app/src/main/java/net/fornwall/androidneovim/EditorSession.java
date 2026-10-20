@@ -374,10 +374,11 @@ final class EditorSession implements NeovimView.Listener {
 
     /** Opens a URL from vim.ui.open, which gx and :Open use, in an app that can browse it. */
     private void openUrl(String url) {
-        if (view == null) return;
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE);
+        // Lua has already reported success. Without an Activity, such as during recreation, start a new task.
+        if (view == null) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
-            view.getContext().startActivity(intent);
+            (view != null ? view.getContext() : context).startActivity(intent);
         } catch (ActivityNotFoundException | SecurityException unavailable) {
             message("No app can open " + url);
         }

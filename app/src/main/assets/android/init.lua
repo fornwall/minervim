@@ -91,6 +91,20 @@ _G.AndroidNeovim = {
   end,
 }
 
+-- gx and :Open use Android's apps for URLs, as no opener process can run. Files would need a
+-- content: URI and are not opened. A replacement from the user's configuration is kept.
+if type(vim.ui.open) == 'function' and debug.getinfo(vim.ui.open, 'S').source:match('vim/ui%.lua$') then
+  vim.ui.open = function(path)
+    vim.validate('path', path, 'string')
+    if not path:match('^%a[%w+.-]*:') or path:match('^file:') then
+      return nil, 'vim.ui.open: Android opens URLs, not files: ' .. path
+    end
+    vim.rpcnotify(channel, 'android_open', path)
+    -- Callers wait for an opener's exit code; Android starts the app asynchronously.
+    return { cmd = { 'android', path }, wait = function() return { code = 0, signal = 0 } end }, nil
+  end
+end
+
 -- Reopen the most recent file kept in app storage, falling back to the welcome notes.
 local start = notes
 for _, file in ipairs(vim.v.oldfiles) do

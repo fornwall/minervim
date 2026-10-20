@@ -4,6 +4,8 @@ import static net.fornwall.androidneovim.EditorIntegrationTest.await;
 import static net.fornwall.androidneovim.EditorIntegrationTest.screen;
 import static org.junit.Assert.*;
 
+import android.app.Activity;
+import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -17,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -147,6 +150,37 @@ public final class SystemIntegrationTest {
                     + "local current = pcall(vim.cmd.help, 'vim.ui.open()'); return {stale, current}", List.of()));
             assertEquals("help", request("nvim_get_option_value", "filetype", Map.of("buf", 0)));
             assertFalse(new File(context.getFilesDir(), "runtime.tmp").exists());
+        }
+    }
+
+    @Test
+    public void uiOpenViewsUrlsWithAndroidApps() throws Exception {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        List<Intent> started = new CopyOnWriteArrayList<>();
+        Instrumentation.ActivityMonitor monitor = new Instrumentation.ActivityMonitor() {
+            @Override public Instrumentation.ActivityResult onStartActivity(Intent intent) {
+                if (!Intent.ACTION_VIEW.equals(intent.getAction())) return null;
+                started.add(new Intent(intent));
+                return new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null);
+            }
+        };
+        instrumentation.addMonitor(monitor);
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            // gx waits for the opener and reports a nonzero exit code as an error.
+            assertEquals(List.of(0L, true), request("nvim_exec_lua", "local cmd, err = vim.ui.open('https://example.com/open'); "
+                    + "return {cmd:wait(1000).code, err == nil}", List.of()));
+            request("nvim_exec_lua", "vim.cmd.enew(); vim.api.nvim_buf_set_lines(0, 0, -1, true, {'see https://example.com/gx'}); "
+                    + "vim.api.nvim_win_set_cursor(0, {1, 8}); vim.cmd.normal('gx')", List.of());
+            request("nvim_command", "Open https://example.com/command");
+            await(() -> started.size() == 3);
+            for (Intent intent : started) assertTrue(intent.hasCategory(Intent.CATEGORY_BROWSABLE));
+            assertEquals(List.of("https://example.com/open", "https://example.com/gx", "https://example.com/command"),
+                    started.stream().map(intent -> intent.getData().toString()).toList());
+            assertEquals(List.of(true, true), request("nvim_exec_lua", "local cmd, err = vim.ui.open('notes.txt'); "
+                    + "return {cmd == nil, err:find('not files', 1, true) ~= nil}", List.of()));
+        } finally {
+            instrumentation.removeMonitor(monitor);
         }
     }
 

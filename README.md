@@ -52,6 +52,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   horizontal wheels. Touchpad two-finger swipes scroll and pinches zoom.
 - The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
   from the row, the soft keyboard, or a hardware keyboard.
+- `gx`, `:Open` and `vim.ui.open()` open URLs in an Android app, such as a
+  browser; they do not open local files.
 - Keyboard, local IME composition, and clipboard paste are supported. **Paste**
   streams large text to Neovim in chunks. Pasted CRLF line breaks, and those read
   by `"+p`, become single line breaks.

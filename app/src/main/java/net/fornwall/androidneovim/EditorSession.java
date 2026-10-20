@@ -1,10 +1,13 @@
 package net.fornwall.androidneovim;
 
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import java.io.File;
@@ -159,6 +162,9 @@ final class EditorSession implements NeovimView.Listener {
                                 case "android_clipboard_set" -> copy(args);
                                 case "android_document_written" -> {
                                     if (!args.isEmpty() && args.get(0) instanceof String written) documentWritten(new File(written));
+                                }
+                                case "android_open" -> {
+                                    if (!args.isEmpty() && args.get(0) instanceof String url) openUrl(url);
                                 }
                                 default -> { }
                             }
@@ -346,6 +352,17 @@ final class EditorSession implements NeovimView.Listener {
                 case NONE -> { }
             }
         }));
+    }
+
+    /** Opens a URL from vim.ui.open, which gx and :Open use, in an app that can browse it. */
+    private void openUrl(String url) {
+        if (view == null) return;
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE);
+        try {
+            view.getContext().startActivity(intent);
+        } catch (ActivityNotFoundException | SecurityException unavailable) {
+            message("No app can open " + url);
+        }
     }
 
     void message(String text) {

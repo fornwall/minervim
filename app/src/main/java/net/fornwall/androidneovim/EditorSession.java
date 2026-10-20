@@ -93,6 +93,8 @@ final class EditorSession implements NeovimView.Listener {
      */
     void detach(NeovimView previous, boolean finishing) {
         if (view != previous) return;
+        // The framework detaches the view only after onDestroy, when it no longer has a listener.
+        previous.releaseInput();
         previous.setListener(null);
         view = null;
         observer = null;

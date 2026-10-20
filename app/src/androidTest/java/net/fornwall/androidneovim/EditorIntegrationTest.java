@@ -350,6 +350,23 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void recreationSendsTextStillBeingComposed() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_command", "enew!");
+            activity.onActivity(a -> a.editorView().sendKey("i"));
+            await(() -> "i".equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("mode")));
+            // Once the IME has restarted for Insert mode, composed text stays in the view until something sends it.
+            await(() -> inputClass(activity) == InputType.TYPE_CLASS_TEXT);
+            activity.onActivity(a -> assertTrue(a.editorView().onCreateInputConnection(new EditorInfo()).setComposingText("hel", 1)));
+            activity.recreate();
+            await(() -> List.of("hel").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));

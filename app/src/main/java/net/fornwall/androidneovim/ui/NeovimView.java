@@ -985,7 +985,7 @@ public final class NeovimView extends View {
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {
         super.onFocusChanged(focused, direction, previous);
-        if (!focused) { resetInput(); invalidate(); }
+        if (!focused) { releaseInput(); invalidate(); }
     }
 
     private void releaseMouse() {
@@ -993,7 +993,11 @@ public final class NeovimView extends View {
         pressedButton = null;
     }
 
-    private void resetInput() {
+    /**
+     * Sends input still in progress, composed text and the release of a held mouse button or drag, and resets
+     * the rest, as when the view loses focus. An owner that stops listening calls it first.
+     */
+    public void releaseInput() {
         removeCallbacks(longPress);
         stopFling();
         releaseMouse();
@@ -1007,7 +1011,7 @@ public final class NeovimView extends View {
     }
 
     @Override protected void onDetachedFromWindow() {
-        resetInput();
+        releaseInput();
         // A detached view announces nothing; the first flush after reattaching schedules a new event.
         removeCallbacks(contentChanged);
         contentChangePending = false;

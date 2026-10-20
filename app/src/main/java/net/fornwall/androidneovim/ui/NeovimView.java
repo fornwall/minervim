@@ -48,6 +48,8 @@ public final class NeovimView extends View {
     private static final int TOUCH_IDLE = 0, TOUCH_PENDING = 1, TOUCH_SCROLL = 2, TOUCH_SELECT = 3, TOUCH_PINCH = 4;
     // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
+    /** IME deletions, and the committed text they are counted over, are bounded to this many characters. */
+    private static final int MAX_IME_DELETE = 256;
     private static final int ADVANCE_BITS = 9;
     // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
     private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
@@ -535,6 +537,8 @@ public final class NeovimView extends View {
         final int generation = ++connectionGeneration;
         return new BaseInputConnection(this, false) {
             private boolean closed;
+            /** The end of what this connection committed, to count deletions in code points rather than units. */
+            private final StringBuilder committed = new StringBuilder();
             // A connection replaced by restartInput still delivers text and keys typed during the restart, but
             // only the current one composes. Closed connections and a detached view deliver nothing.
             private boolean active() { return !closed && isAttachedToWindow(); }
@@ -542,7 +546,11 @@ public final class NeovimView extends View {
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
                 if (generation == connectionGeneration) composition = "";
-                if (text != null && text.length() > 0) commitIme(text.toString());
+                if (text != null && text.length() > 0) {
+                    commitIme(text.toString());
+                    committed.append(text);
+                    if (committed.length() > MAX_IME_DELETE) committed.delete(0, committed.length() - MAX_IME_DELETE);
+                }
                 invalidate();
                 return true;
             }
@@ -565,16 +573,36 @@ public final class NeovimView extends View {
             }
             @Override public boolean deleteSurroundingText(int before, int after) {
                 if (!active()) return false;
+                if (current() && !composition.isEmpty()) return delete(before, after);
+                // Keyboards delete an emoji as two UTF-16 units, but Neovim deletes one character per <BS>.
+                int codePoints = 0;
+                for (int units = before; units > 0 && codePoints < MAX_IME_DELETE; codePoints++) units -= Math.max(1, forgetCodePoint());
+                return delete(codePoints, after);
+            }
+            @Override public boolean deleteSurroundingTextInCodePoints(int before, int after) {
+                if (!active()) return false;
+                if (!current() || composition.isEmpty()) for (int i = 0; i < Math.min(before, MAX_IME_DELETE); i++) forgetCodePoint();
+                return delete(before, after);
+            }
+            /** Removes the last committed code point and returns its length in UTF-16 units, or 0 if none is known. */
+            private int forgetCodePoint() {
+                if (committed.length() == 0) return 0;
+                int length = Character.charCount(Character.codePointBefore(committed, committed.length()));
+                committed.setLength(committed.length() - length);
+                return length;
+            }
+            /** Deletes code points from the composition if there is one, otherwise around Neovim's cursor. */
+            private boolean delete(int before, int after) {
                 if (current() && !composition.isEmpty()) {
                     int count = composition.codePointCount(0, composition.length());
                     composition = composition.substring(0, composition.offsetByCodePoints(0, Math.max(0, count - Math.max(0, before))));
                     invalidate();
                 } else if (listener != null) {
-                    listener.input("<BS>".repeat(Math.max(0, Math.min(256, before))) + "<Del>".repeat(Math.max(0, Math.min(256, after))));
+                    listener.input("<BS>".repeat(Math.max(0, Math.min(MAX_IME_DELETE, before)))
+                            + "<Del>".repeat(Math.max(0, Math.min(MAX_IME_DELETE, after))));
                 }
                 return true;
             }
-            @Override public boolean deleteSurroundingTextInCodePoints(int before, int after) { return deleteSurroundingText(before, after); }
             @Override public CharSequence getTextBeforeCursor(int length, int flags) {
                 if (!current()) return "";
                 return composition.substring(Math.max(0, composition.length() - Math.max(0, length)));

@@ -694,4 +694,17 @@ public class NeovimViewTest {
             assertEquals(List.of("<A-j>", "ç", "<A-c>", "<C-S-j>", "<C-A->>"), input.keys);
         });
     }
+
+    @Test public void imeDeletionsCountCommittedCodePoints() {
+        attached((activity, view, input) -> {
+            InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.commitText("a😀", 1));
+            // Keyboards delete a non-BMP character as two UTF-16 units.
+            assertTrue(connection.deleteSurroundingText(2, 0));
+            assertTrue(connection.deleteSurroundingTextInCodePoints(1, 1));
+            // Beyond the committed text, each unit is one character.
+            assertTrue(connection.deleteSurroundingText(2, 0));
+            assertEquals(List.of("a😀", "<BS>", "<BS><Del>", "<BS><BS>"), input.keys);
+        });
+    }
 }

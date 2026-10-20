@@ -687,6 +687,7 @@ public final class NeovimView extends View {
             @Override public boolean sendKeyEvent(KeyEvent event) { return active() && dispatchKeyEvent(event); }
             @Override public boolean performEditorAction(int action) {
                 if (!active()) return false;
+                commitComposition();
                 input("<CR>");
                 return true;
             }

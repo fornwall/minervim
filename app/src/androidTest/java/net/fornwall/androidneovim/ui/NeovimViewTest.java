@@ -979,4 +979,13 @@ public class NeovimViewTest {
             assertEquals(List.of("<k5>", "<kPlus>", "<C-kMultiply>", "<kEnter>", "é", "<Esc>", "e"), input.keys);
         });
     }
+
+    @Test public void imeEditorActionSendsComposingTextFirst() {
+        attached((activity, view, input) -> {
+            InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.setComposingText("hel", 1));
+            assertTrue(connection.performEditorAction(EditorInfo.IME_ACTION_UNSPECIFIED));
+            assertEquals(List.of("hel", "<CR>"), input.keys);
+        });
+    }
 }

@@ -149,6 +149,36 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void imeEnterIsReturnAndMultiLineCommitsArePasted() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            // Autoindent and an insert-mode mapping would mangle multi-line text typed as keys.
+            request(session, "nvim_exec_lua", "vim.cmd('enew!'); vim.bo.autoindent = true; "
+                    + "vim.keymap.set('i', 'jk', '<Esc>')", List.of());
+            activity.onActivity(a -> a.editorView().sendKey("i"));
+            await(() -> "i".equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("mode")));
+            activity.onActivity(a -> {
+                var input = a.editorView().onCreateInputConnection(new EditorInfo());
+                assertTrue(input.commitText("  ab", 1));
+                assertTrue(input.commitText("\n", 1));
+                assertTrue(input.commitText("jk\n  x\n", 1));
+            });
+            await(() -> List.of("  ab", "  jk", "  x", "").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
+            assertEquals("i", ((Map<?, ?>) request(session, "nvim_get_mode")).get("mode"));
+        }
+    }
+
+    private static void awaitUi(EditorSession session) throws Exception {
+        await(() -> {
+            try { return !((List<?>) request(session, "nvim_list_uis")).isEmpty(); }
+            catch (Exception starting) { return false; }
+        });
+        await(() -> String.valueOf(request(session, "nvim_buf_get_name", 0)).endsWith("notes.txt"));
+    }
+
     private static String screen(ActivityScenario<MainActivity> activity) {
         AtomicReference<String> text = new AtomicReference<>();
         activity.onActivity(a -> text.set(a.editorView().screenText()));

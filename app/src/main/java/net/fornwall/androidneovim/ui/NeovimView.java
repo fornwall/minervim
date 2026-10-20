@@ -517,7 +517,7 @@ public final class NeovimView extends View {
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
                 composition = "";
-                if (text != null && text.length() > 0) input(KeyNotation.literal(text.toString()));
+                if (text != null && text.length() > 0) commitIme(text.toString());
                 invalidate();
                 return true;
             }
@@ -567,6 +567,20 @@ public final class NeovimView extends View {
                 super.closeConnection();
             }
         };
+    }
+
+    /**
+     * Keyboards commit Enter as a line break, which is {@code <CR>} rather than CTRL-J. Other text with line
+     * breaks (clipboard suggestions, dictation) is pasted, so it is neither run as commands nor mapped.
+     */
+    private void commitIme(String text) {
+        if (text.equals("\n") || text.equals("\r") || text.equals("\r\n")) input("<CR>");
+        else if (text.indexOf('\n') < 0 && text.indexOf('\r') < 0) input(KeyNotation.literal(text));
+        else {
+            // Like any other commit, a paste consumes sticky modifiers.
+            clearModifiers();
+            if (listener != null) listener.paste(text);
+        }
     }
 
     private void cancelComposition() {

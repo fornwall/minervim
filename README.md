@@ -47,7 +47,9 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
 - The extra-keys row has sticky **Ctrl** and **Alt**: they modify the next key
   from the row, the soft keyboard, or a hardware keyboard.
 - Keyboard, local IME composition, and clipboard paste are supported. **Paste**
-  is capped at 64 Ki characters.
+  is capped at 64 Ki characters. The soft keyboard's Enter is `<CR>`, and
+  multi-line text it commits (clipboard suggestions, dictation) is pasted
+  rather than typed, so mappings and autoindent do not apply to it.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to disable the writes. On the next start the

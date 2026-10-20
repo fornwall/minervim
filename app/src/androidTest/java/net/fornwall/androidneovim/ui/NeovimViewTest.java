@@ -31,10 +31,15 @@ public class NeovimViewTest {
     private static final class InputLog implements NeovimView.Listener {
         final List<String> keys = new ArrayList<>();
         final List<String> mouse = new ArrayList<>();
-        @Override public void input(String input) { keys.add(input); }
-        @Override public void paste(String text) { }
+        final List<String> pastes = new ArrayList<>();
+        /** Keys, pastes and mouse events in order. */
+        final List<String> events = new ArrayList<>();
+        @Override public void input(String input) { keys.add(input); events.add(input); }
+        @Override public void paste(String text) { pastes.add(text); events.add("paste " + text); }
         @Override public void mouse(String button, String action, String modifiers, int row, int column) {
-            mouse.add(button + " " + action + " " + row + "," + column);
+            String event = button + " " + action + " " + row + "," + column;
+            mouse.add(event);
+            events.add(event);
         }
         @Override public void resize(int columns, int rows) { }
     }
@@ -45,6 +50,29 @@ public class NeovimViewTest {
         @Override public void paste(String text) { }
         @Override public void mouse(String button, String action, String modifiers, int row, int column) { }
         @Override public void resize(int columns, int rows) { sizes.add(columns + "x" + rows); }
+    }
+
+    private interface AttachedTest { void run(Activity activity, NeovimView view, InputLog input); }
+
+    /** Runs {@code test} on the main thread with a focused view in a started activity, then detaches it. */
+    private static void attached(AttachedTest test) {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Activity activity = instrumentation.startActivitySync(intent);
+        try {
+            instrumentation.runOnMainSync(() -> {
+                NeovimView view = new NeovimView(activity);
+                InputLog input = new InputLog();
+                activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));
+                view.setListener(input);
+                view.requestFocus();
+                test.run(activity, view, input);
+                if (view.getParent() != null) ((ViewGroup) view.getParent()).removeView(view);
+            });
+        } finally {
+            instrumentation.runOnMainSync(activity::finish);
+        }
     }
 
     @Test public void hardwareKeysUseNeovimNotationAndLiteralLessThan() {
@@ -572,5 +600,19 @@ public class NeovimViewTest {
         } finally {
             instrumentation.runOnMainSync(activity::finish);
         }
+    }
+
+    @Test public void imeLineBreaksAreEnterAndMultiLineTextIsPasted() {
+        attached((activity, view, input) -> {
+            InputConnection connection = view.onCreateInputConnection(new EditorInfo());
+            assertTrue(connection.commitText("\n", 1));
+            assertTrue(connection.commitText("\r\n", 1));
+            view.toggleCtrl();
+            assertTrue(connection.commitText("\n", 1));
+            assertTrue(connection.commitText("a\n  b", 1));
+            assertTrue(connection.commitText("<x>", 1));
+            assertEquals(List.of("<CR>", "<CR>", "<C-CR>", "<LT>x>"), input.keys);
+            assertEquals(List.of("a\n  b"), input.pastes);
+        });
     }
 }

@@ -41,6 +41,14 @@ public class MessagePackTest {
         }
     }
 
+    @Test public void singleAsciiCharactersShareOneString() throws Exception {
+        List<?> cells = (List<?>) roundTrip(List.of("a", "a", "", "é", "ab", "\u007f"));
+        assertSame(cells.get(0), cells.get(1));
+        assertEquals(List.of("a", "a", "", "é", "ab", "\u007f"), cells);
+        assertEquals("\ufffd", MessagePack.read(new ByteArrayInputStream(new byte[]{(byte) 0xa1, (byte) 0xff})));
+        assertThrows(IOException.class, () -> MessagePack.read(new ByteArrayInputStream(new byte[]{(byte) 0xa1})));
+    }
+
     @Test public void binaryAndNeovimHandlesRoundTrip() throws Exception {
         byte[] bytes = {(byte) 0xff, 0, 42};
         assertArrayEquals(bytes, (byte[]) roundTrip(bytes));

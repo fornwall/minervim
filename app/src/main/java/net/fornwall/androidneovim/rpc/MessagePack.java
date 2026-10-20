@@ -16,6 +16,12 @@ public final class MessagePack {
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private static final int MAX_ITEMS = 262_144;
     private static final int MAX_DEPTH = 64;
+    /** Most grid_line cells hold one ASCII character; decode them without allocating. */
+    private static final String[] ASCII = new String[128];
+
+    static {
+        for (int i = 0; i < ASCII.length; i++) ASCII[i] = String.valueOf((char) i);
+    }
 
     private MessagePack() {}
 
@@ -117,6 +123,13 @@ public final class MessagePack {
     }
 
     private static String string(InputStream input, int length, Budget budget) throws IOException {
+        if (length == 0) return "";
+        if (length == 1) {
+            budget.bytes(1);
+            int value = octet(input);
+            if (value < ASCII.length) return ASCII[value];
+            return new String(new byte[]{(byte) value}, StandardCharsets.UTF_8);
+        }
         return new String(bytes(input, length, budget), StandardCharsets.UTF_8);
     }
 

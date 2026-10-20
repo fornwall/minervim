@@ -114,7 +114,8 @@ replacing a pinched size, and no size restores the pinched one; font names are
 ignored. Single, double, dotted and dashed underlines and
 strikethrough follow the font's line metrics and use the text color unless `guisp`
 sets one; undercurl is a wave. Overline is drawn, standout is drawn as reverse
-video, and the block cursor is hollow while the editor view lacks focus.
+video, and the block cursor is hollow while the editor or its window lacks focus.
+The editor takes focus at launch, while the soft keyboard waits for a tap.
 Cross-cell ligatures, cached row rendering, rich accessibility navigation, and full
 IME surrounding-text behavior are future work.
 

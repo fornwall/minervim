@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.WindowInsets;
 import android.webkit.MimeTypeMap;
 import androidx.lifecycle.Lifecycle;
 import androidx.test.core.app.ActivityScenario;
@@ -261,6 +262,27 @@ public final class SystemIntegrationTest {
             assertTrue(temporary, temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getPath())
                     || temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getCanonicalPath()));
         }
+    }
+
+    @Test
+    public void editorHasFocusAfterLaunchAndRecreationWithoutShowingTheKeyboard() throws Exception {
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            // A focused editor in a focused window draws a solid block cursor.
+            await(() -> editorFocused(activity));
+            Thread.sleep(1000);
+            AtomicReference<Boolean> keyboard = new AtomicReference<>();
+            activity.onActivity(a -> keyboard.set(a.getWindow().getDecorView().getRootWindowInsets().isVisible(WindowInsets.Type.ime())));
+            assertFalse(keyboard.get());
+            activity.recreate();
+            await(() -> editorFocused(activity));
+        }
+    }
+
+    private static boolean editorFocused(ActivityScenario<MainActivity> activity) {
+        AtomicReference<Boolean> focused = new AtomicReference<>();
+        activity.onActivity(a -> focused.set(a.editorView().isFocused() && a.editorView().hasWindowFocus()));
+        return focused.get();
     }
 
     private void save(File file, String line) throws Exception {

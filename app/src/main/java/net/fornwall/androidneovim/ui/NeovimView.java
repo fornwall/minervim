@@ -312,7 +312,7 @@ public final class NeovimView extends View {
                 case "vertical" -> canvas.drawRect(x, y, x + Math.max(1, cellWidth * frame.cursorPercentage / 100), y + cellHeight, fill);
                 case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, right, y + cellHeight, fill);
                 default -> {
-                    if (isFocused()) {
+                    if (isFocused() && hasWindowFocus()) {
                         canvas.drawRect(x, y, right, y + cellHeight, fill);
                         int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
                         textPaints[style].setColor(frame.cursorForeground());
@@ -322,7 +322,8 @@ public final class NeovimView extends View {
                         drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, style);
                         canvas.restoreToCount(clipped);
                     } else {
-                        // Keys do not reach an unfocused view, so its block cursor is hollow, as in terminals.
+                        // Keys reach only a focused view in a focused window, so otherwise the block cursor
+                        // is hollow, as in terminals.
                         float inset = stroke.getStrokeWidth() / 2;
                         stroke.setColor(frame.cursorBackground());
                         canvas.drawRect(x + inset, y + inset, right - inset, y + cellHeight - inset, stroke);
@@ -926,6 +927,7 @@ public final class NeovimView extends View {
     @Override public void onWindowFocusChanged(boolean hasWindowFocus) {
         super.onWindowFocusChanged(hasWindowFocus);
         if (listener != null) listener.focus(hasWindowFocus);
+        invalidate();
     }
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {

@@ -629,6 +629,10 @@ public class NeovimViewTest {
         Intent intent = new Intent(instrumentation.getTargetContext(), MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity = instrumentation.startActivitySync(intent);
         try {
+            // A solid cursor also needs window focus.
+            for (long deadline = SystemClock.uptimeMillis() + 5000; !activity.hasWindowFocus() && SystemClock.uptimeMillis() < deadline; ) {
+                SystemClock.sleep(20);
+            }
             instrumentation.runOnMainSync(() -> {
                 NeovimView view = new NeovimView(activity);
                 activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));

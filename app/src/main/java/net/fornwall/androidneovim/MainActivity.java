@@ -80,7 +80,8 @@ public final class MainActivity extends Activity {
         action(toolbar, "Keys", "Show the software keyboard", () -> editor.showKeyboard());
         root.addView(toolbar);
         editor = new NeovimView(this, session.grid);
-        editor.setId(View.generateViewId());
+        // A stable id lets a recreated Activity restore the editor's state.
+        editor.setId(R.id.editor);
         root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout extraKeys = row();
         key(extraKeys, "Esc", "Escape", "<Esc>");
@@ -107,6 +108,8 @@ public final class MainActivity extends Activity {
         root.addView(extraKeys);
         setContentView(root);
         root.requestApplyInsets();
+        // Keys go to the editor from the start; the soft keyboard still waits for a tap (stateHidden).
+        editor.requestFocus();
         session.attach(editor, new EditorSession.Observer() {
             @Override public void onStatus(String message, boolean ready) {
                 status.setText(message);

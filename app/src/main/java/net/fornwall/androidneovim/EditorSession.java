@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -165,6 +166,8 @@ final class EditorSession implements NeovimView.Listener {
                 client.start();
                 commands = new EditorCommands(client::request, main::post,
                         retry -> main.postDelayed(retry, 10));
+                // Names this UI in nvim_get_chan_info() and :checkhealth.
+                client.request("nvim_set_client_info", "android-neovim", clientVersion(), "ui", Map.of(), Map.of());
                 client.request("nvim_get_api_info")
                         .thenCompose(info -> client.request("nvim_exec_lua", init, List.of(((List<?>) info).get(0),
                                 home.getAbsolutePath(), notes.getAbsolutePath(), documents.directory.getAbsolutePath())))
@@ -201,6 +204,19 @@ final class EditorSession implements NeovimView.Listener {
         }, "neovim-exit");
         watcher.setDaemon(true);
         watcher.start();
+    }
+
+    /** The app's versionName, such as 0.1, as a client-info version dictionary. */
+    private Map<String, Object> clientVersion() {
+        Map<String, Object> version = new HashMap<>();
+        try {
+            String[] parts = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName.split("\\.");
+            String[] keys = {"major", "minor", "patch"};
+            for (int i = 0; i < Math.min(keys.length, parts.length); i++) version.put(keys[i], Long.parseLong(parts[i]));
+        } catch (Exception unknown) {
+            // The version is informational.
+        }
+        return version;
     }
 
     private void copyAsset(String name, File destination) throws IOException {

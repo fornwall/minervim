@@ -296,6 +296,18 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void identifiesItselfToNeovimAsAUi() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            Map<?, ?> client = (Map<?, ?>) ((Map<?, ?>) request(session, "nvim_get_chan_info", 0)).get("client");
+            assertEquals("android-neovim", client.get("name"));
+            assertEquals("ui", client.get("type"));
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));

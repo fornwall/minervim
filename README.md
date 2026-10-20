@@ -108,6 +108,8 @@ depend on `TerminalSession`, `libterm`, terminal modes, or scrollback.
 ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 ```
 
+Device tests run under the AndroidX Test Orchestrator with cleared app data:
+Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, MessagePack limits and RPC lifecycle,
 including requests from Neovim.
 Device tests exercise the real JNI core, Unicode IME input (including input

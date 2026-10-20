@@ -15,6 +15,8 @@ android {
         versionCode = 1
         versionName = "0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Neovim cannot restart in-process, so each device test gets a fresh process and app data.
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
         ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
     }
 
@@ -27,6 +29,7 @@ android {
         assets.directories += layout.buildDirectory.dir("generated/neovim/assets").get().asFile.path
     }
     lint { disable += "UseKtx" }
+    testOptions { execution = "ANDROIDX_TEST_ORCHESTRATOR" }
 }
 
 val buildNeovim = tasks.register<Exec>("buildNeovim") {
@@ -46,4 +49,5 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestUtil("androidx.test:orchestrator:1.6.1")
 }

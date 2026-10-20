@@ -82,20 +82,25 @@ final class EditorCommands {
      * pair within one chunk. Resolves once Neovim has handled every chunk.
      */
     CompletableFuture<Object> paste(String text) {
-        List<CompletableFuture<Object>> chunks = new ArrayList<>();
+        List<String> chunks = new ArrayList<>();
         int start = 0;
         do {
             int end = Math.min(text.length(), start + PASTE_CHUNK);
             if (end < text.length() && (Character.isHighSurrogate(text.charAt(end - 1))
                     || text.charAt(end - 1) == '\r' && text.charAt(end) == '\n')) end--;
-            int phase = start == 0 ? (end == text.length() ? -1 : 1) : (end == text.length() ? 3 : 2);
-            CompletableFuture<Object> chunk = request("nvim_paste", text.substring(start, end), true, phase);
-            chunks.add(chunk);
-            if (chunk.isCompletedExceptionally()) break;
+            chunks.add(text.substring(start, end));
             start = end;
         } while (start < text.length());
-        return CompletableFuture.allOf(chunks.toArray(new CompletableFuture<?>[0]))
-                .thenApply(ignored -> chunks.get(chunks.size() - 1).join());
+        // A paste cut short would leave Neovim's paste stream open, so all chunks must fit.
+        if (closed == null && queue.size() + sent.size() + chunks.size() > MAX_OPERATIONS)
+            return CompletableFuture.failedFuture(new IOException("Editor command queue is full"));
+        List<CompletableFuture<Object>> results = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            int phase = chunks.size() == 1 ? -1 : i == 0 ? 1 : i == chunks.size() - 1 ? 3 : 2;
+            results.add(request("nvim_paste", chunks.get(i), true, phase));
+        }
+        return CompletableFuture.allOf(results.toArray(new CompletableFuture<?>[0]))
+                .thenApply(ignored -> results.get(results.size() - 1).join());
     }
 
     void close(Throwable cause) {

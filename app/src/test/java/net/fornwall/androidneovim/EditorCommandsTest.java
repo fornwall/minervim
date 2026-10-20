@@ -154,13 +154,16 @@ public class EditorCommandsTest {
         assertArrayEquals(new Object[]{"a\r\nb", true, -1}, fake.arguments.get(0));
         fake.reply(true);
         assertEquals(true, small.join());
+        fake.commands.paste("");
+        assertArrayEquals(new Object[]{"", true, -1}, fake.arguments.get(1));
+        fake.reply(true);
 
         int size = EditorCommands.PASTE_CHUNK;
         String text = "x".repeat(size - 1) + "\r\n" + "y".repeat(size - 3) + "🙂" + "z".repeat(size);
         CompletableFuture<Object> large = fake.commands.paste(text);
         List<String> chunks = new ArrayList<>();
         List<Object> phases = new ArrayList<>();
-        for (Object[] args : fake.arguments.subList(1, fake.arguments.size())) {
+        for (Object[] args : fake.arguments.subList(2, fake.arguments.size())) {
             chunks.add((String) args[0]);
             assertEquals(true, args[1]);
             phases.add(args[2]);
@@ -174,6 +177,21 @@ public class EditorCommandsTest {
         assertFalse(large.isDone());
         fake.reply(true);
         assertEquals(true, large.join());
+    }
+
+    @Test public void pasteThatDoesNotFitIsNotStarted() {
+        Fake fake = new Fake();
+        for (int i = 0; i < 125; i++) fake.commands.request("nvim_command", "echo");
+        String text = "x".repeat(3 * EditorCommands.PASTE_CHUNK + 1);
+        assertTrue(fake.commands.paste(text).isCompletedExceptionally());
+        assertFalse(fake.methods.contains("nvim_paste"));
+        fake.reply(null);
+        CompletableFuture<Object> pasted = fake.commands.paste(text);
+        assertFalse(pasted.isCompletedExceptionally());
+        List<Object> phases = new ArrayList<>();
+        for (int i = 0; i < fake.methods.size(); i++)
+            if (fake.methods.get(i).equals("nvim_paste")) phases.add(fake.arguments.get(i)[2]);
+        assertEquals(List.of(1, 2, 2, 3), phases);
     }
 
     @Test public void partialUtf8IsRetriedAsExactBytesBeforeNextCommand() {

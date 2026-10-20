@@ -3,6 +3,9 @@ package net.fornwall.androidneovim.ui;
 import static org.junit.Assert.*;
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -295,5 +298,69 @@ public class NeovimViewTest {
         } finally {
             instrumentation.runOnMainSync(activity::finish);
         }
+    }
+
+    /** Draws one flushed white-on-black row into a bitmap; busy hides the cursor. */
+    private static Bitmap render(NeovimView view, int columns, List<?> cells) {
+        view.handleRedraw(List.of(List.of("default_colors_set", List.of(0xffffff, 0, 0xff0000, 0, 0)),
+                List.of("grid_resize", List.of(1, columns, 1)), List.of("grid_line", List.of(1, 0, 0, cells, false)),
+                List.of("busy_start", List.of()), List.of("flush", List.of())));
+        int width = (int) Math.ceil(columns * view.cellWidth()), height = (int) view.cellHeight();
+        view.layout(0, 0, width, height);
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        view.draw(new Canvas(bitmap));
+        return bitmap;
+    }
+
+    private static boolean ink(Bitmap bitmap, int x, int y) { return Color.green(bitmap.getPixel(x, y)) > 96; }
+
+    /** The number of pixel rows with ink in columns [left, right). */
+    private static int inkRows(Bitmap bitmap, int left, int right) {
+        int count = 0;
+        for (int y = 0; y < bitmap.getHeight(); y++) {
+            for (int x = Math.max(0, left); x < Math.min(bitmap.getWidth(), right); x++) {
+                if (ink(bitmap, x, y)) { count++; break; }
+            }
+        }
+        return count;
+    }
+
+    /** The leftmost and rightmost columns with ink. */
+    private static int[] inkColumns(Bitmap bitmap) {
+        int first = bitmap.getWidth(), last = -1;
+        for (int x = 0; x < bitmap.getWidth(); x++) {
+            if (inkRows(bitmap, x, x + 1) > 0) { first = Math.min(first, x); last = x; }
+        }
+        return new int[] {first, last};
+    }
+
+    /** The bitmap as text, for assertion messages. */
+    private static String art(Bitmap bitmap) {
+        StringBuilder text = new StringBuilder();
+        for (int y = 0; y < bitmap.getHeight(); y++) {
+            text.append('\n');
+            for (int x = 0; x < bitmap.getWidth(); x++) text.append(ink(bitmap, x, y) ? '#' : '.');
+        }
+        return text.toString();
+    }
+
+    @Test public void wideFallbackGlyphsFitTheirCellsAndNarrowOnesAreCentred() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            float w = view.cellWidth();
+            // The fallback arrow is wider than a cell: its head must be narrowed into the cell, not cut off.
+            Bitmap arrow = render(view, 3, List.of(List.of(" ", 0), List.of("→"), List.of(" ")));
+            int left = (int) Math.ceil(w), right = (int) Math.floor(2 * w), middle = (left + right) / 2;
+            int[] arrowInk = inkColumns(arrow);
+            assertTrue(art(arrow), inkRows(arrow, middle, right) > 2 * inkRows(arrow, left, middle));
+            assertTrue(art(arrow), arrowInk[0] >= left - 1 && arrowInk[1] >= right - w / 4 && arrowInk[1] <= right);
+            Bitmap bar = render(view, 3, List.of(List.of(" ", 0), List.of("│"), List.of(" ")));
+            int[] barInk = inkColumns(bar);
+            assertEquals(art(bar), 1.5f * w, (barInk[0] + barInk[1] + 1) / 2f, 1.5f);
+            Bitmap wide = render(view, 4, List.of(List.of(" ", 0), List.of("界"), List.of(""), List.of(" ")));
+            int[] wideInk = inkColumns(wide);
+            assertEquals(art(wide), wideInk[0] - w, 3 * w - wideInk[1] - 1, 2.5f);
+        });
     }
 }

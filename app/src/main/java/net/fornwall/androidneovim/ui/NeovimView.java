@@ -28,6 +28,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.OverScroller;
 import android.widget.Toast;
+import java.util.Arrays;
 import java.util.List;
 
 /** A direct Neovim grid UI; there is no terminal emulator or escape-sequence layer. */
@@ -44,9 +45,15 @@ public final class NeovimView extends View {
     private static final int TOUCH_IDLE = 0, TOUCH_PENDING = 1, TOUCH_SCROLL = 2, TOUCH_SELECT = 3, TOUCH_PINCH = 4;
     // Neovim's default 'mousescroll' moves 3 lines or 6 columns per wheel event.
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
+    private static final int ADVANCE_BITS = 9;
     private final NeovimGrid grid = new NeovimGrid();
     private final Paint[] textPaints = new Paint[4];
     private final int[] maximumRun = new int[4];
+    private final float[] textScales = new float[4];
+    private final float[] advanceErrors = new float[4];
+    // Per-style advances of drawn clusters, direct-mapped by text and cleared when the font changes.
+    private final String[][] advanceKeys = new String[4][1 << ADVANCE_BITS];
+    private final float[][] advanceValues = new float[4][1 << ADVANCE_BITS];
     private final Paint fill = new Paint();
     private final Paint curl = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path curlPath = new Path();
@@ -142,11 +149,14 @@ public final class NeovimView extends View {
         for (int style = 0; style < textPaints.length; style++) {
             Paint paint = textPaints[style];
             paint.getTextWidths(ASCII, advances);
-            paint.setTextScaleX(cellWidth / advances['M' - ' ']);
+            textScales[style] = cellWidth / advances['M' - ' '];
+            paint.setTextScaleX(textScales[style]);
             paint.getTextWidths(ASCII, advances);
             float error = 0;
             for (float advance : advances) error = Math.max(error, Math.abs(advance - cellWidth));
             maximumRun[style] = error < 1e-4f ? Integer.MAX_VALUE : (int) (0.25f / error);
+            advanceErrors[style] = Math.max(error, 1e-4f);
+            Arrays.fill(advanceKeys[style], null);
         }
     }
 
@@ -212,10 +222,15 @@ public final class NeovimView extends View {
                 case "vertical" -> canvas.drawRect(x, y, x + Math.max(1, cellWidth * frame.cursorPercentage / 100), y + cellHeight, fill);
                 case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, x + cellWidth, y + cellHeight, fill);
                 default -> {
-                    canvas.drawRect(x, y, x + cellSpan(frame, frame.cursorRow, frame.cursorColumn) * cellWidth, y + cellHeight, fill);
-                    Paint paint = paint(frame.highlight(frame.cursorRow, frame.cursorColumn));
-                    paint.setColor(frame.cursorForeground());
-                    drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, paint);
+                    float right = x + cellSpan(frame, frame.cursorRow, frame.cursorColumn) * cellWidth;
+                    canvas.drawRect(x, y, right, y + cellHeight, fill);
+                    int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
+                    textPaints[style].setColor(frame.cursorForeground());
+                    // Only the block shows the cursor colors; overhanging ink keeps the cell's own color.
+                    int saved = canvas.save();
+                    canvas.clipRect(x, y, right, y + cellHeight);
+                    drawCell(canvas, frame, frame.cursorRow, frame.cursorColumn, y, style);
+                    canvas.restoreToCount(saved);
                 }
             }
             if (!composition.isEmpty()) {
@@ -232,26 +247,30 @@ public final class NeovimView extends View {
     }
 
     private static int style(NeovimGrid.Highlight highlight) { return (highlight.bold ? Typeface.BOLD : 0) | (highlight.italic ? Typeface.ITALIC : 0); }
-    private Paint paint(NeovimGrid.Highlight highlight) { return textPaints[style(highlight)]; }
     private static int cellSpan(NeovimGrid.Frame frame, int row, int column) {
         return column + 1 < frame.columns && frame.text(row, column + 1).isEmpty() ? 2 : 1;
     }
 
-    /** Draws each equally highlighted span: printable ASCII as text runs, other glyphs clipped per cell. */
+    /**
+     * Draws each equally highlighted span: printable ASCII, and single characters before U+0590 that the
+     * font draws at the cell width, as text runs; other clusters are fitted to their cells one by one.
+     */
     private void drawRow(Canvas canvas, NeovimGrid.Frame frame, int row, float y, int visibleColumns) {
         for (int start = 0, end; start < visibleColumns; start = end) {
             int attribute = frame.attribute(row, start);
             for (end = start + 1; end < visibleColumns && frame.attribute(row, end) == attribute; end++) { }
             NeovimGrid.Highlight highlight = frame.highlight(attribute);
             drawDecorations(canvas, frame, highlight, start * cellWidth, end * cellWidth, y);
-            Paint paint = paint(highlight);
+            int style = style(highlight);
+            Paint paint = textPaints[style];
             paint.setColor(frame.foreground(highlight));
-            int limit = maximumRun[style(highlight)];
+            int limit = maximumRun[style];
             int runStart = -1, length = 0, trimmed = 0;
             for (int column = start; column < end; column++) {
                 String text = frame.text(row, column);
                 char c = text.length() == 1 ? text.charAt(0) : 0;
-                if (limit > 1 && c >= ' ' && c < 0x7f) {
+                if (limit > 1 && c >= ' ' && (c < 0x7f || (c >= 0xa0 && c < 0x590
+                        && Math.abs(advance(style, text) - cellWidth) <= advanceErrors[style]))) {
                     if (length == limit) {
                         drawRun(canvas, runStart, trimmed, y, paint);
                         runStart = -1;
@@ -268,7 +287,7 @@ public final class NeovimView extends View {
                 drawRun(canvas, runStart, trimmed, y, paint);
                 runStart = -1;
                 length = trimmed = 0;
-                drawCell(canvas, frame, row, column, y, paint);
+                drawCell(canvas, frame, row, column, y, style);
             }
             drawRun(canvas, runStart, trimmed, y, paint);
         }
@@ -297,15 +316,29 @@ public final class NeovimView extends View {
         }
     }
 
-    private void drawCell(Canvas canvas, NeovimGrid.Frame frame, int row, int column, float y, Paint paint) {
+    /**
+     * Draws a cluster centred in its cell span, or narrowed to fit it: Neovim counts fallback symbols
+     * (arrows, box drawing, dingbats) as one cell although they are wider than the monospace advance.
+     */
+    private void drawCell(Canvas canvas, NeovimGrid.Frame frame, int row, int column, float y, int style) {
         String text = frame.text(row, column);
         if (text.isBlank()) return;
-        float x = column * cellWidth;
-        int saved = canvas.save();
-        canvas.clipRect(x, y, x + cellSpan(frame, row, column) * cellWidth, y + cellHeight);
+        Paint paint = textPaints[style];
+        float x = column * cellWidth, span = cellSpan(frame, row, column) * cellWidth, advance = advance(style, text);
+        if (advance > span) paint.setTextScaleX(textScales[style] * span / advance);
+        else x += (span - advance) / 2;
         // Explicit LTR shaping follows TerminalRowPainter; Neovim owns cell order.
         canvas.drawTextRun(text, 0, text.length(), 0, text.length(), x, y + baseline, false, paint);
-        canvas.restoreToCount(saved);
+        paint.setTextScaleX(textScales[style]);
+    }
+
+    private float advance(int style, String text) {
+        int slot = (text.hashCode() * 0x9e3779b9) >>> (32 - ADVANCE_BITS);
+        if (!text.equals(advanceKeys[style][slot])) {
+            advanceKeys[style][slot] = text;
+            advanceValues[style][slot] = textPaints[style].getRunAdvance(text, 0, text.length(), 0, text.length(), false, text.length());
+        }
+        return advanceValues[style][slot];
     }
 
     public void setModifierListener(ModifierListener listener) { modifierListener = listener; }

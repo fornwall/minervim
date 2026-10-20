@@ -109,7 +109,8 @@ IME surrounding-text behavior are future work.
 ## Architecture
 
 - `native/`: pinned upstream download, cross-build patches, JNI startup, exit and
-  subprocess adapters. Process signal handling remains with Android.
+  subprocess adapters. The editor thread gets upstream's 8 MiB main-thread stack.
+  Process signal handling remains with Android.
 - `EditorSession`: app-lifetime native session, private Unix socket transport,
   runtime extraction, UI attachment, and clipboard. `EditorCommands` orders
   requests after earlier input and retries input byte-exactly. Neovim defers most
@@ -143,10 +144,11 @@ larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
 round-trips (including more lines than one RPC message may hold), CRLF paste,
-requests at a "Press ENTER" prompt, background saves, window focus events, IME
-line breaks and modes, and editor shutdown, including Lua's `os.exit()`. UI tests
-also cover hardware key notation, sticky modifiers, IME lifecycle and deletions,
-mouse modifiers, touch and touchpad gestures, and accessibility.
+requests at a "Press ENTER" prompt, deep Vimscript recursion, background saves,
+window focus events, IME line breaks and modes, and editor shutdown, including
+Lua's `os.exit()`. UI tests also cover hardware key notation, sticky modifiers,
+IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
+accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

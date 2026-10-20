@@ -282,6 +282,20 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void deepVimscriptRecursionFitsTheEditorStack() throws Exception {
+        int process = Process.myPid();
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            assertEquals(500L, request(session, "nvim_exec_lua", "vim.o.maxfuncdepth = 1000; vim.cmd([[\n"
+                    + "function! AndroidDepth(n)\n  return a:n <= 1 ? 1 : 1 + AndroidDepth(a:n - 1)\nendfunction\n]]); "
+                    + "return vim.fn.AndroidDepth(500)", List.of()));
+            assertEquals(process, Process.myPid());
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));

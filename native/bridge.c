@@ -87,7 +87,13 @@ Java_net_fornwall_androidneovim_NativeBridge_start(JNIEnv *env, jclass type,
   (*env)->ReleaseStringUTFChars(env, socket_path, socket);
   if (!args || !args->files || !args->socket) { fail("Unable to allocate Neovim startup state"); return; }
   pthread_t thread;
-  int error = pthread_create(&thread, NULL, run_editor, args);
+  pthread_attr_t attributes;
+  pthread_attr_init(&attributes);
+  // Upstream Neovim runs on an 8 MiB main thread; Android's 1 MiB default overflows in
+  // recursive Vimscript well below 'maxfuncdepth'.
+  pthread_attr_setstacksize(&attributes, 8 * 1024 * 1024);
+  int error = pthread_create(&thread, &attributes, run_editor, args);
+  pthread_attr_destroy(&attributes);
   if (error) { fail("Unable to start the Neovim thread"); return; }
   pthread_detach(thread);
 }

@@ -1,5 +1,6 @@
 package net.fornwall.androidneovim;
 
+import android.annotation.SuppressLint;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
@@ -29,8 +30,10 @@ import java.util.concurrent.Executor;
 /**
  * Local copies of Android documents. Each copy is remembered by local path with its original and the
  * version of the original it last matched, so a Neovim write can update a writable original that has
- * not changed elsewhere. All file and provider I/O runs on the serial file executor.
+ * not changed elsewhere. All file and provider I/O runs on the serial file executor, which also
+ * commits the records synchronously so that a process death cannot lose one.
  */
+@SuppressLint("ApplySharedPref")
 final class Documents {
     /** What a Neovim write of a local copy did to its original. */
     enum WriteBack { NONE, UPDATED, READ_ONLY, CHANGED_ELSEWHERE, FORGOTTEN }

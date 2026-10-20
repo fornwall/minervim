@@ -756,11 +756,13 @@ public final class NeovimView extends View {
             return true;
         }
         if (KeyEvent.isModifierKey(keyCode)) return true;
-        // AltGr is text input, but layouts without that level (US, ChromeOS) leave right Alt as Alt.
-        // Ctrl, Alt and Super encode Neovim modifiers.
-        boolean altGr = (event.getMetaState() & KeyEvent.META_ALT_RIGHT_ON) != 0 && event.getUnicodeChar() != 0;
-        boolean modified = !altGr && (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed());
         int meta = event.getMetaState();
+        // Right Alt is AltGr text input where it types characters of its own. Where it types what left Alt does,
+        // or nothing (US, ChromeOS and the default layouts), it is Alt. Ctrl, Alt and Super encode Neovim modifiers.
+        int rightAlt = (meta & KeyEvent.META_ALT_RIGHT_ON) != 0 ? event.getUnicodeChar() : 0;
+        boolean altGr = rightAlt != 0
+                && rightAlt != event.getUnicodeChar((meta & ~KeyEvent.META_ALT_RIGHT_ON) | KeyEvent.META_ALT_LEFT_ON);
+        boolean modified = !altGr && (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed());
         if (modified) meta &= ~(KeyEvent.META_CTRL_MASK | KeyEvent.META_ALT_MASK | KeyEvent.META_META_MASK);
         int unicode = event.getUnicodeChar(meta);
         if ((unicode & KeyCharacterMap.COMBINING_ACCENT) != 0) {

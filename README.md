@@ -71,8 +71,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   been idle for 150 ms; a key typed at that very moment can still be lost.
 - On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys are
   `<k0>`–`<k9>`, `<kPlus>`, `<kEnter>` and so on (their characters unless
-  mapped), and right Alt is Alt on layouts without AltGr characters (US,
-  ChromeOS).
+  mapped), and right Alt is Alt unless the layout gives it characters of its own
+  (AltGr), so it is Alt on US, ChromeOS and the default layouts.
 - `FocusGained` and `FocusLost` fire when the app window gains or loses input
   focus, for example behind a dialog or when the app goes to the background.
 - When the app goes to the background, modified named file buffers are written

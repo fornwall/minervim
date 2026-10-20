@@ -12,6 +12,7 @@ import android.graphics.Color;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.InputDevice;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
@@ -797,6 +798,20 @@ public class NeovimViewTest {
         return new KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta);
     }
 
+    /** A key on a layout with an AltGr level, as in German: right Alt types @ on Q and a dead acute on E. */
+    private static final class AltGrKey extends KeyEvent {
+        AltGrKey(int keyCode, int meta) { super(0, 0, ACTION_DOWN, keyCode, 0, meta); }
+        @Override public int getUnicodeChar(int meta) {
+            if ((meta & META_ALT_MASK) == 0) return super.getUnicodeChar(meta);
+            if ((meta & (META_ALT_RIGHT_ON | META_CTRL_ON)) != META_ALT_RIGHT_ON) return 0;
+            return switch (getKeyCode()) {
+                case KEYCODE_Q -> '@';
+                case KEYCODE_E -> KeyCharacterMap.COMBINING_ACCENT | '\u00b4';
+                default -> 0;
+            };
+        }
+    }
+
     @Test public void rightAltIsAltWithoutAltGrCharactersAndCtrlShiftLettersKeepShift() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         instrumentation.runOnMainSync(() -> {
@@ -804,15 +819,17 @@ public class NeovimViewTest {
             InputLog input = new InputLog();
             view.setListener(input);
             int rightAlt = KeyEvent.META_ALT_ON | KeyEvent.META_ALT_RIGHT_ON;
-            // The virtual keyboard layout has an Alt character for C but none for J.
+            // The virtual keyboard layout has an Alt character for C, for either Alt key, and none for J.
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_J, key(KeyEvent.KEYCODE_J, rightAlt)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_C, key(KeyEvent.KEYCODE_C, rightAlt)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_C, key(KeyEvent.KEYCODE_C, KeyEvent.META_ALT_ON | KeyEvent.META_ALT_LEFT_ON)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_Q, new AltGrKey(KeyEvent.KEYCODE_Q, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_J, new AltGrKey(KeyEvent.KEYCODE_J, rightAlt)));
             int ctrlShift = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON | KeyEvent.META_SHIFT_ON | KeyEvent.META_SHIFT_LEFT_ON;
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_J, key(KeyEvent.KEYCODE_J, ctrlShift)));
             view.toggleAlt();
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_PERIOD, key(KeyEvent.KEYCODE_PERIOD, ctrlShift)));
-            assertEquals(List.of("<A-j>", "ç", "<A-c>", "<C-S-j>", "<C-A->>"), input.keys);
+            assertEquals(List.of("<A-j>", "<A-c>", "<A-c>", "@", "<A-j>", "<C-S-j>", "<C-A->>"), input.keys);
         });
     }
 
@@ -953,11 +970,10 @@ public class NeovimViewTest {
             int ctrl = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON;
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_MULTIPLY, key(KeyEvent.KEYCODE_NUMPAD_MULTIPLY, ctrl)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_ENTER, key(KeyEvent.KEYCODE_NUMPAD_ENTER, 0)));
-            // The virtual keyboard layout has a dead acute accent on Alt+E.
             int rightAlt = KeyEvent.META_ALT_ON | KeyEvent.META_ALT_RIGHT_ON;
-            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, new AltGrKey(KeyEvent.KEYCODE_E, rightAlt)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, 0)));
-            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, new AltGrKey(KeyEvent.KEYCODE_E, rightAlt)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_ESCAPE, key(KeyEvent.KEYCODE_ESCAPE, 0)));
             assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, 0)));
             assertEquals(List.of("<k5>", "<kPlus>", "<C-kMultiply>", "<kEnter>", "é", "<Esc>", "e"), input.keys);

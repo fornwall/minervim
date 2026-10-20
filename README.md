@@ -33,9 +33,14 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   paths such as `:e todo.txt` resolve there too.
 - **Open** edits a document chosen through Android's picker, and the app also
   accepts text documents and shared text from other apps. Neovim edits a local
-  copy. When Android grants write access, each write also updates the original,
-  and that grant is persisted. **Export** writes a copy to a destination chosen
-  through Android. Documents are limited to 4 MiB.
+  copy; opening the same document again reuses it while both have the same
+  content. When Android grants write access, each write also updates the
+  original, and that grant is persisted. A write stays local, with a notice, if
+  the original is read-only or changed elsewhere since it was opened or last
+  updated (by modification time and size, else content). **Export** writes a copy
+  to a destination chosen through Android. Documents are limited to 4 MiB. A copy
+  replaced by a newer one, or forgotten after 64 newer documents, is deleted at the
+  next start unless it has local changes.
 - The `+` and `*` registers use Android's clipboard: `"+y`, `"+p`, and
   `clipboard=unnamedplus` work without a clipboard tool. **Copy** copies the
   visual selection, or the current line outside visual mode. Clipboard text is
@@ -143,18 +148,18 @@ ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, MessagePack limits and RPC
-lifecycle, including requests from Neovim, and command ordering, resize
-coalescing and chunked paste.
+lifecycle, including requests from Neovim, command ordering, resize coalescing
+and chunked paste, and document change detection.
 Device tests exercise the real JNI core, Unicode IME input (including input
 larger than Neovim's queue), saving, visible redraws, Activity recreation,
 same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
 round-trips (including more lines than one RPC message may hold), CRLF paste,
 requests at a "Press ENTER" prompt, deep Vimscript recursion, background saves,
-window focus events, IME line breaks and modes, and editor shutdown, including
-Lua's `os.exit()`. UI tests also cover hardware key notation, sticky modifiers,
-IME lifecycle and deletions, mouse modifiers, touch and touchpad gestures, and
-accessibility.
+window focus events, IME line breaks and modes, document write-back through a
+test provider, setup errors, and editor shutdown, including Lua's `os.exit()`.
+UI tests also cover hardware key notation, sticky modifiers, IME lifecycle and
+deletions, mouse modifiers, touch and touchpad gestures, and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

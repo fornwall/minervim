@@ -106,6 +106,8 @@ final class EditorSession implements NeovimView.Listener {
                 copyAsset("runtime", runtime);
                 Files.writeString(marker.toPath(), Long.toString(update));
             }
+            // Neovim has not started, so no buffer holds a copy that is deleted now.
+            documents.prune();
             File notes = new File(home, "notes.txt");
             if (!notes.exists()) {
                 Files.writeString(notes.toPath(), "Welcome to Neovim on Android.\n\n"
@@ -330,9 +332,18 @@ final class EditorSession implements NeovimView.Listener {
     }
 
     private void documentWritten(File local) {
-        documents.written(local).whenComplete((uri, error) -> main.post(() -> {
+        documents.written(local).whenComplete((result, error) -> main.post(() -> {
             if (error != null) message("Saved locally; updating the original failed: " + rootMessage(error));
-            else if (uri != null) message("Saved " + local.getName());
+            else switch (result) {
+                case UPDATED -> message("Saved " + local.getName());
+                case READ_ONLY -> message("Saved locally only: Android granted no write access to the original. "
+                        + "Export saves a copy elsewhere.");
+                case CHANGED_ELSEWHERE -> message("Saved locally only: the original changed elsewhere. "
+                        + "Use Export, or reopen it.");
+                case FORGOTTEN -> message("Saved locally only: this copy no longer updates its original. "
+                        + "Use Export, or reopen it.");
+                case NONE -> { }
+            }
         }));
     }
 

@@ -79,6 +79,21 @@ public class NeovimGridTest {
         assertTrue(frame.highlight(0, 0).bold);
     }
 
+    @Test public void decorationsUseTextColorUnlessSpecialIsSet() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("default_colors_set", 0x111111, 0x222222, 0xff0000, 0, 0),
+                event("hl_attr_define", 1, Map.of("underline", true, "foreground", 0x333333), Map.of(), List.of()),
+                event("hl_attr_define", 2, Map.of("underdashed", true, "special", 0x444444), Map.of(), List.of()),
+                event("hl_attr_define", 3, Map.of("strikethrough", true, "reverse", true), Map.of(), List.of()),
+                event("hl_attr_define", 4, Map.of("undercurl", true), Map.of(), List.of()), flush()));
+        NeovimGrid.Frame frame = grid.frame();
+        assertEquals(0xff333333, frame.decoration(frame.highlight(1)));
+        assertEquals(0xff444444, frame.decoration(frame.highlight(2)));
+        assertEquals(0xff222222, frame.decoration(frame.highlight(3)));
+        assertEquals(0xffff0000, frame.special(frame.highlight(4)));
+        assertEquals(0xff444444, frame.special(frame.highlight(2)));
+    }
+
     @Test public void modeInfoDoesNotRetainMutableEvents() {
         NeovimGrid grid = new NeovimGrid();
         var mode = new java.util.HashMap<String, Object>();

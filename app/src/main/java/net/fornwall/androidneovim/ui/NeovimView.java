@@ -299,8 +299,7 @@ public final class NeovimView extends View {
 
     private void drawDecorations(Canvas canvas, NeovimGrid.Frame frame, NeovimGrid.Highlight highlight, float left, float right, float y) {
         if (!highlight.underline && !highlight.undercurl && !highlight.strikethrough) return;
-        int color = frame.special(highlight);
-        fill.setColor(color);
+        fill.setColor(frame.decoration(highlight));
         if (highlight.underline) canvas.drawRect(left, y + cellHeight - 1, right, y + cellHeight, fill);
         if (highlight.strikethrough) canvas.drawRect(left, y + cellHeight / 2, right, y + cellHeight / 2 + 1, fill);
         if (highlight.undercurl) {
@@ -311,7 +310,7 @@ public final class NeovimView extends View {
             for (float x = left, sign = -1; x < right - 0.5f; x += half, sign = -sign) {
                 curlPath.quadTo(x + half / 2, middle + 2 * sign * amplitude, x + half, middle);
             }
-            curl.setColor(color);
+            curl.setColor(frame.special(highlight));
             canvas.drawPath(curlPath, curl);
         }
     }

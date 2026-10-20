@@ -251,6 +251,11 @@ public final class NeovimGrid {
         public int background(Highlight highlight) {
             return highlight.reverse ? color(highlight.foreground, foreground) : color(highlight.background, background);
         }
+        /** Underlines and strikethrough use special when the highlight sets it, otherwise the text color (like the TUI). */
+        public int decoration(Highlight highlight) {
+            return highlight.special >= 0 ? color(highlight.special, special) : foreground(highlight);
+        }
+        /** Undercurl falls back to the default special color, which Neovim makes red unless Normal sets guisp. */
         public int special(Highlight highlight) { return color(highlight.special, special); }
         /** The mode's cursor highlight (mode_info attr_id) or, when undefined, inverted default colors. */
         public int cursorBackground() {

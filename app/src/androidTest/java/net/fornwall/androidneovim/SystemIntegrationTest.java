@@ -326,6 +326,25 @@ public final class SystemIntegrationTest {
         return focused.get();
     }
 
+    @Test
+    public void reopeningADocumentWithUnsavedChangesKeepsThem() throws Exception {
+        int readWrite = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+        Uri uri = TestDocumentProvider.uri("unsaved-" + System.nanoTime() + ".txt");
+        writeOriginal(uri, "saved\n");
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            File copy = session.documents.importDocument(uri, readWrite).get(10, TimeUnit.SECONDS);
+            session.edit(copy).get(10, TimeUnit.SECONDS);
+            request("nvim_buf_set_lines", 0, 0, -1, true, List.of("unsaved"));
+            // The copy still has the original's content, so it is reused, and its buffer is shown as it is.
+            File reopened = session.documents.importDocument(uri, readWrite).get(10, TimeUnit.SECONDS);
+            assertEquals(copy.getCanonicalFile(), reopened.getCanonicalFile());
+            session.edit(reopened).get(10, TimeUnit.SECONDS);
+            assertEquals(List.of("unsaved"), request("nvim_buf_get_lines", 0, 0, -1, true));
+            assertEquals(Boolean.TRUE, request("nvim_get_option_value", "modified", Map.of("buf", 0)));
+        }
+    }
+
     private void save(File file, String line) throws Exception {
         request("nvim_exec_lua", "local path, line = ...; vim.cmd.edit(vim.fn.fnameescape(path)); "
                 + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {line}); vim.cmd.write()", List.of(file.getAbsolutePath(), line));

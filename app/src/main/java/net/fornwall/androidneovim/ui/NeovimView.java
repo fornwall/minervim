@@ -217,12 +217,12 @@ public final class NeovimView extends View {
                 && frame.cursorColumn >= 0 && frame.cursorColumn < visibleColumns) {
             float x = frame.cursorColumn * cellWidth;
             float y = top + frame.cursorRow * cellHeight;
+            float right = x + cellSpan(frame, frame.cursorRow, frame.cursorColumn) * cellWidth;
             fill.setColor(frame.cursorBackground());
             switch (frame.cursorShape) {
                 case "vertical" -> canvas.drawRect(x, y, x + Math.max(1, cellWidth * frame.cursorPercentage / 100), y + cellHeight, fill);
-                case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, x + cellWidth, y + cellHeight, fill);
+                case "horizontal" -> canvas.drawRect(x, y + cellHeight * (100 - frame.cursorPercentage) / 100, right, y + cellHeight, fill);
                 default -> {
-                    float right = x + cellSpan(frame, frame.cursorRow, frame.cursorColumn) * cellWidth;
                     canvas.drawRect(x, y, right, y + cellHeight, fill);
                     int style = style(frame.highlight(frame.cursorRow, frame.cursorColumn));
                     textPaints[style].setColor(frame.cursorForeground());

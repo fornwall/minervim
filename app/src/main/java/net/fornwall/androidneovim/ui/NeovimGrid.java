@@ -257,14 +257,17 @@ public final class NeovimGrid {
         }
         /** Undercurl falls back to the default special color, which Neovim makes red unless Normal sets guisp. */
         public int special(Highlight highlight) { return color(highlight.special, special); }
-        /** The mode's cursor highlight (mode_info attr_id) or, when undefined, inverted default colors. */
+        /** The mode's cursor highlight (mode_info attr_id); attr_id 0 and unset colors swap the cell's colors. */
         public int cursorBackground() {
             Highlight cursor = highlight(cursorAttribute);
-            return color(cursor.reverse ? cursor.foreground : cursor.background, foreground);
+            return color(cursorAttribute == 0 ? -1 : cursor.reverse ? cursor.foreground : cursor.background, foreground(cursorCell()));
         }
         public int cursorForeground() {
             Highlight cursor = highlight(cursorAttribute);
-            return color(cursor.reverse ? cursor.background : cursor.foreground, background);
+            return color(cursorAttribute == 0 ? -1 : cursor.reverse ? cursor.background : cursor.foreground, background(cursorCell()));
+        }
+        private Highlight cursorCell() {
+            return cursorRow >= 0 && cursorRow < rows && cursorColumn >= 0 && cursorColumn < columns ? highlight(cursorRow, cursorColumn) : DEFAULT;
         }
     }
 }

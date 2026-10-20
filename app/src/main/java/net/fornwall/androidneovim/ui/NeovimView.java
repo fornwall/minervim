@@ -635,8 +635,9 @@ public final class NeovimView extends View {
             return true;
         }
         if (KeyEvent.isModifierKey(keyCode)) return true;
-        // AltGr is text input; Ctrl/left Alt/Super encode Neovim modifiers.
-        boolean altGr = (event.getMetaState() & KeyEvent.META_ALT_RIGHT_ON) != 0;
+        // AltGr is text input, but layouts without that level (US, ChromeOS) leave right Alt as Alt.
+        // Ctrl, Alt and Super encode Neovim modifiers.
+        boolean altGr = (event.getMetaState() & KeyEvent.META_ALT_RIGHT_ON) != 0 && event.getUnicodeChar() != 0;
         boolean modified = !altGr && (event.isCtrlPressed() || event.isAltPressed() || event.isMetaPressed());
         int meta = event.getMetaState();
         if (modified) meta &= ~(KeyEvent.META_CTRL_MASK | KeyEvent.META_ALT_MASK | KeyEvent.META_META_MASK);
@@ -653,11 +654,9 @@ public final class NeovimView extends View {
             else if (listener != null) listener.input(KeyNotation.literal(new String(Character.toChars(pendingAccent))));
             pendingAccent = 0;
         }
-        String text = new String(Character.toChars(unicode));
         if (modified) {
-            String key = unicode == ' ' ? "Space" : unicode == '<' ? "LT" : text;
-            input("<" + KeyNotation.modifiers(event.getMetaState(), false) + key + ">");
-        } else input(KeyNotation.literal(text));
+            input(KeyNotation.modifiedKey(unicode, event.getUnicodeChar(meta & ~KeyEvent.META_SHIFT_MASK), event.getMetaState()));
+        } else input(KeyNotation.literal(new String(Character.toChars(unicode))));
         return true;
     }
 

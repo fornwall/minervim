@@ -36,16 +36,30 @@ final class KeyNotation {
         };
     }
 
+    /**
+     * A character typed with Ctrl, Alt or Super, given the character without Shift. Neovim folds Shift into
+     * the character except for Ctrl with a letter, so Ctrl+Shift+J is {@code <C-S-j>}, not {@code <C-J>} (CTRL-J).
+     */
+    static String modifiedKey(int unicode, int unshifted, int meta) {
+        boolean shiftLetter = (meta & KeyEvent.META_CTRL_ON) != 0 && (meta & KeyEvent.META_SHIFT_ON) != 0
+                && (unshifted >= 'a' && unshifted <= 'z' || unshifted >= 'A' && unshifted <= 'Z');
+        String key = shiftLetter ? String.valueOf(Character.toLowerCase((char) unshifted))
+                : unicode == ' ' ? "Space" : unicode == '<' ? "LT" : new String(Character.toChars(unicode));
+        return "<" + modifiers(meta, shiftLetter) + key + ">";
+    }
+
     /** Adds modifiers to one key such as {@code <S-Tab>} or {@code :}; other input is returned unchanged. */
     static String modified(String keys, boolean ctrl, boolean alt) {
         String key, existing = "";
         int last = keys.length() - 1;
-        if (last > 1 && keys.charAt(0) == '<' && keys.indexOf('<', 1) < 0 && keys.indexOf('>') == last) {
+        if (last > 1 && keys.charAt(0) == '<' && keys.indexOf('<', 1) < 0 && keys.charAt(last) == '>') {
             key = keys.substring(1, last);
             while (key.length() > 2 && key.charAt(1) == '-' && "CAMDS".indexOf(Character.toUpperCase(key.charAt(0))) >= 0) {
                 existing += Character.toUpperCase(key.charAt(0));
                 key = key.substring(2);
             }
+            // <C->> is one key, but <LT>a> is three.
+            if (key.indexOf('>') >= 0 && !key.equals(">")) return keys;
         } else if (!keys.isEmpty() && keys.codePointCount(0, keys.length()) == 1) {
             key = keys.equals(" ") ? "Space" : keys;
         } else return keys;

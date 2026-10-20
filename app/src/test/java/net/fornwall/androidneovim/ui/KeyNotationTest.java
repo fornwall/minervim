@@ -34,5 +34,21 @@ public class KeyNotationTest {
         assertEquals("<C-😀>", KeyNotation.modified("😀", true, false));
         assertEquals("abc", KeyNotation.modified("abc", true, false));
         assertEquals("<LT>a", KeyNotation.modified("<LT>a", true, false));
+        assertEquals("<C-A->>", KeyNotation.modified("<C->>", false, true));
+        assertEquals("<C->>", KeyNotation.modified(">", true, false));
+        assertEquals("<LT>a>", KeyNotation.modified("<LT>a>", true, false));
+    }
+
+    @Test public void ctrlKeepsShiftOnlyWithLetters() {
+        int ctrlShift = KeyEvent.META_CTRL_ON | KeyEvent.META_SHIFT_ON;
+        assertEquals("<C-S-j>", KeyNotation.modifiedKey('J', 'j', ctrlShift));
+        assertEquals("<C-S-j>", KeyNotation.modifiedKey('j', 'J', ctrlShift | KeyEvent.META_CAPS_LOCK_ON));
+        assertEquals("<C-A-S-j>", KeyNotation.modifiedKey('J', 'j', ctrlShift | KeyEvent.META_ALT_ON));
+        assertEquals("<C-j>", KeyNotation.modifiedKey('j', 'j', KeyEvent.META_CTRL_ON));
+        assertEquals("<A-J>", KeyNotation.modifiedKey('J', 'j', KeyEvent.META_ALT_ON | KeyEvent.META_SHIFT_ON));
+        assertEquals("<C-@>", KeyNotation.modifiedKey('@', '2', ctrlShift));
+        assertEquals("<C-Ж>", KeyNotation.modifiedKey('Ж', 'ж', ctrlShift));
+        assertEquals("<A-Space>", KeyNotation.modifiedKey(' ', ' ', KeyEvent.META_ALT_ON));
+        assertEquals("<D-LT>", KeyNotation.modifiedKey('<', ',', KeyEvent.META_META_ON | KeyEvent.META_SHIFT_ON));
     }
 }

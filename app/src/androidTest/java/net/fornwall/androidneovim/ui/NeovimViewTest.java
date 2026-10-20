@@ -671,4 +671,27 @@ public class NeovimViewTest {
             assertEquals(List.of("y"), input.keys);
         });
     }
+
+    private static KeyEvent key(int keyCode, int meta) {
+        return new KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta);
+    }
+
+    @Test public void rightAltIsAltWithoutAltGrCharactersAndCtrlShiftLettersKeepShift() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            view.setListener(input);
+            int rightAlt = KeyEvent.META_ALT_ON | KeyEvent.META_ALT_RIGHT_ON;
+            // The virtual keyboard layout has an Alt character for C but none for J.
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_J, key(KeyEvent.KEYCODE_J, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_C, key(KeyEvent.KEYCODE_C, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_C, key(KeyEvent.KEYCODE_C, KeyEvent.META_ALT_ON | KeyEvent.META_ALT_LEFT_ON)));
+            int ctrlShift = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON | KeyEvent.META_SHIFT_ON | KeyEvent.META_SHIFT_LEFT_ON;
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_J, key(KeyEvent.KEYCODE_J, ctrlShift)));
+            view.toggleAlt();
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_PERIOD, key(KeyEvent.KEYCODE_PERIOD, ctrlShift)));
+            assertEquals(List.of("<A-j>", "ç", "<A-c>", "<C-S-j>", "<C-A->>"), input.keys);
+        });
+    }
 }

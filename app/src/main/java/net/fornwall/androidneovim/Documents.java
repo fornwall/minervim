@@ -138,12 +138,17 @@ final class Documents {
             Copy copy = Copy.decode(String.valueOf(entry.getValue()));
             if (copy.state() != Copy.FORGOTTEN) continue;
             editor.remove(entry.getKey());
-            // Paths are canonical: a copy is the only file in its own directory under the root.
+            // Paths are canonical. Files saved beside a copy, as with :saveas, keep its directory.
             File local = new File(entry.getKey());
             File parent = local.getParentFile();
             if (copy.sha256() != null && copy.sha256().equals(localSha256(local))
                     && parent != null && root.equals(parent.getParentFile())) {
-                try { FileTrees.delete(parent); } catch (IOException ignored) { }
+                try {
+                    Files.deleteIfExists(local.toPath());
+                    Files.deleteIfExists(parent.toPath());
+                } catch (IOException notEmpty) {
+                    // Such as a DirectoryNotEmptyException.
+                }
             }
         }
         editor.apply();

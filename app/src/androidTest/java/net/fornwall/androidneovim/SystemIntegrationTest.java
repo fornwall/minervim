@@ -119,12 +119,20 @@ public final class SystemIntegrationTest {
             assertEquals("ex\n", Files.readString(reopened.toPath()));
             assertEquals(Documents.WriteBack.FORGOTTEN, documents.written(local).get(10, TimeUnit.SECONDS));
             writeOriginal(uri, "ex 2\n");
+            File forgotten = documents.importDocument(uri, readWrite).get(10, TimeUnit.SECONDS);
+            writeOriginal(uri, "ex 3\n");
             File newest = documents.importDocument(uri, readWrite).get(10, TimeUnit.SECONDS);
-            // Pruning deletes the unchanged forgotten copy, and keeps the one with local changes.
+            // A file that the user saved beside a copy, as with :saveas %:h/other.txt.
+            File beside = new File(reopened.getParentFile(), "other.txt");
+            Files.writeString(beside.toPath(), "kept\n");
+            // Pruning deletes unchanged forgotten copies, with their directories once empty, and keeps the
+            // copy with local changes.
             session.files.submit(documents::prune).get(10, TimeUnit.SECONDS);
             assertEquals("v3\n", Files.readString(local.toPath()));
-            assertFalse(reopened.getParentFile().exists());
-            assertEquals("ex 2\n", Files.readString(newest.toPath()));
+            assertFalse(reopened.exists());
+            assertEquals("kept\n", Files.readString(beside.toPath()));
+            assertFalse(forgotten.getParentFile().exists());
+            assertEquals("ex 3\n", Files.readString(newest.toPath()));
 
             Uri readOnly = TestDocumentProvider.uri("read-only-" + System.nanoTime() + ".txt");
             writeOriginal(readOnly, "ro\n");

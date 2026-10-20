@@ -78,8 +78,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   focus, for example behind a dialog or when the app goes to the background.
 - When the app goes to the background, modified named file buffers are written
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
-  `vim.g.android_autosave = false` to disable the writes. On the next start the
-  most recent file in app storage reopens. Persistent undo is on by default.
+  `vim.g.android_autosave = false` to keep buffers unwritten; ShaDa is still
+  saved. On the next start the most recent file in app storage reopens. Persistent undo is on by default.
 - Neovim's `background` follows the system dark/light theme, also when it changes
   while the editor is open, unless `vim.g.android_follow_system_theme = false`.
 - Neovim starts normally: `:e $MYVIMRC` edits

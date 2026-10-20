@@ -73,8 +73,8 @@ end })
 _G.AndroidNeovim = {
   -- Android may end a background process without notice: save named file buffers and history.
   background = function()
-    if vim.g.android_autosave == false then return end
-    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    -- android_autosave = false keeps buffers unwritten; history is still saved.
+    for _, buf in ipairs(vim.g.android_autosave == false and {} or vim.api.nvim_list_bufs()) do
       local bo = vim.bo[buf]
       if bo.modified and bo.buftype == '' and bo.modifiable and not bo.readonly
           and vim.api.nvim_buf_get_name(buf) ~= '' then

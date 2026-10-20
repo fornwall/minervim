@@ -385,6 +385,23 @@ public final class SystemIntegrationTest {
         }
     }
 
+    @Test
+    public void backgroundSavesHistoryWhenAutosaveIsOff() throws Exception {
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            File file = new File(context.getFilesDir(), "unsaved.txt");
+            File shada = new File((String) request("nvim_exec_lua", "vim.g.android_autosave = false; "
+                    + "vim.cmd.enew(); vim.api.nvim_buf_set_name(0, ...); vim.api.nvim_buf_set_lines(0, 0, -1, true, {'kept'}); "
+                    + "return vim.fn.stdpath('state') .. '/shada/main.shada'", List.of(file.getAbsolutePath())));
+            assertFalse(shada.exists());
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(session::background);
+            // Neovim runs requests in order, so this one returns after the background save.
+            request("nvim_eval", "1");
+            assertTrue(shada.isFile());
+            assertFalse(file.exists());
+        }
+    }
+
     private void save(File file, String line) throws Exception {
         request("nvim_exec_lua", "local path, line = ...; vim.cmd.edit(vim.fn.fnameescape(path)); "
                 + "vim.api.nvim_buf_set_lines(0, 0, -1, true, {line}); vim.cmd.write()", List.of(file.getAbsolutePath(), line));

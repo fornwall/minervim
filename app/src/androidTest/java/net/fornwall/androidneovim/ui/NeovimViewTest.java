@@ -770,6 +770,22 @@ public class NeovimViewTest {
         });
     }
 
+    @Test public void detachingCancelsAPendingImeRestart() throws Exception {
+        attachedOnTestThread((activity, view, input) -> {
+            main(() -> {
+                assertTrue(view.onCreateInputConnection(new EditorInfo()).commitText("o", 1));
+                view.handleRedraw(mode("insert", 1));
+                assertFalse(view.textInput());
+                ((ViewGroup) view.getParent()).removeView(view);
+            });
+            SystemClock.sleep(500);
+            // A restart left pending would run now, or on attaching the view again.
+            main(() -> activity.addContentView(view, new ViewGroup.LayoutParams(200, 200)));
+            SystemClock.sleep(500);
+            main(() -> assertFalse(view.textInput()));
+        });
+    }
+
     @Test public void textComposedForTheNewModeIsSentWhenTheImeRestarts() throws Exception {
         attachedOnTestThread((activity, view, input) -> {
             InputConnection[] connection = new InputConnection[1];

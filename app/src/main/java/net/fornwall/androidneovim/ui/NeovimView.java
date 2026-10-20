@@ -990,7 +990,9 @@ public final class NeovimView extends View {
 
     @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {
         super.onFocusChanged(focused, direction, previous);
-        if (!focused) { releaseInput(); invalidate(); }
+        if (!focused) releaseInput();
+        // The block cursor is hollow without focus.
+        invalidate();
     }
 
     private void releaseMouse() {
@@ -1017,6 +1019,9 @@ public final class NeovimView extends View {
 
     @Override protected void onDetachedFromWindow() {
         releaseInput();
+        // A view for the same grid takes its input mode from the last frame, so a detached one restarts nothing.
+        removeCallbacks(modeRestart);
+        modeRestartPending = false;
         // A detached view announces nothing; the first flush after reattaching schedules a new event.
         removeCallbacks(contentChanged);
         contentChangePending = false;

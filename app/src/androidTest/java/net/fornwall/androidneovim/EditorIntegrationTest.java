@@ -8,6 +8,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.os.Process;
 import android.text.InputType;
+import android.view.KeyEvent;
 import android.view.inputmethod.EditorInfo;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -364,6 +365,28 @@ public final class EditorIntegrationTest {
             activity.onActivity(a -> assertTrue(a.editorView().onCreateInputConnection(new EditorInfo()).setComposingText("hel", 1)));
             activity.recreate();
             await(() -> List.of("hel").equals(request(session, "nvim_buf_get_lines", 0, 0, -1, true)));
+        }
+    }
+
+    @Test
+    public void backSendsTextStillBeingComposedBeforeEsc() throws Exception {
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_command", "enew!");
+            activity.onActivity(a -> a.editorView().sendKey("i"));
+            await(() -> "i".equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("mode")));
+            await(() -> inputClass(activity) == InputType.TYPE_CLASS_TEXT);
+            await(() -> {
+                AtomicBoolean escapes = new AtomicBoolean();
+                activity.onActivity(a -> escapes.set(a.backEscapes()));
+                return escapes.get();
+            });
+            activity.onActivity(a -> assertTrue(a.editorView().onCreateInputConnection(new EditorInfo()).setComposingText("hel", 1)));
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            await(() -> "n".equals(((Map<?, ?>) request(session, "nvim_get_mode")).get("mode")));
+            assertEquals(List.of("hel"), request(session, "nvim_buf_get_lines", 0, 0, -1, true));
         }
     }
 

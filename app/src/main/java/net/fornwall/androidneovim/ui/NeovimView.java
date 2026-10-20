@@ -476,9 +476,14 @@ public final class NeovimView extends View {
 
     /** Sends Neovim key notation. Active sticky modifiers apply to a single key, then clear. */
     public void sendKey(String keys) {
+        commitPendingInput();
+        input(keys);
+    }
+
+    /** Sends composed text and drops a pending dead key, as before any key; for keys sent past the view. */
+    public void commitPendingInput() {
         commitComposition();
         pendingAccent = 0;
-        input(keys);
     }
 
     private void input(String keys) {

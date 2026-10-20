@@ -158,6 +158,8 @@ public final class MainActivity extends Activity {
     }
 
     private void escape() {
+        // Composed text goes first; sticky modifiers do not apply to Back.
+        editor.commitPendingInput();
         // A terminal passes <Esc> on to its job; <C-\><C-N> leaves Terminal mode.
         session.input(mode.equals("terminal") ? "<C-\\><C-N>" : "<Esc>");
         // Some modes, such as Ex mode, ignore it. Until the mode changes, Back goes to Android.

@@ -276,9 +276,14 @@ public final class EditorIntegrationTest {
         EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             awaitUi(session);
-            request(session, "nvim_exec_lua", "vim.schedule(function() os.exit(3) end)", List.of());
+            File left = new File(context.getFilesDir(), "vim-leave.txt");
+            request(session, "nvim_exec_lua", "local path = ...; vim.api.nvim_create_autocmd('VimLeavePre', "
+                    + "{callback = function() vim.fn.writefile({'left'}, path) end}); "
+                    + "vim.schedule(function() os.exit(3) end)", List.of(left.getAbsolutePath()));
             await(() -> onMain(session::stopped) && onMain(session::status).contains("exited (3)"));
             assertEquals(process, Process.myPid());
+            // Only Neovim's own exit path runs VimLeavePre; an exit() that skips it stops the session too.
+            assertEquals("left\n", Files.readString(left.toPath()));
         }
     }
 

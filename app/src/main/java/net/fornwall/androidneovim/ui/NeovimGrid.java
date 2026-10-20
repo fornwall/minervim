@@ -32,6 +32,7 @@ public final class NeovimGrid {
     private boolean busy;
     private int linespace;
     private float guifontSize;
+    private int guifontSets;
     private Frame frame;
 
     /** Until default_colors_set, frames use Neovim's built-in Normal colors for a dark or light background. */
@@ -102,7 +103,10 @@ public final class NeovimGrid {
                     }
                     case "option_set" -> {
                         if ("linespace".equals(args.get(0)) && args.get(1) instanceof Number number) linespace = number.intValue();
-                        if ("guifont".equals(args.get(0)) && args.get(1) instanceof String font) guifontSize = guifontSize(font);
+                        if ("guifont".equals(args.get(0)) && args.get(1) instanceof String font) {
+                            guifontSize = guifontSize(font);
+                            guifontSets++;
+                        }
                     }
                     case "busy_start" -> busy = true;
                     case "busy_stop" -> busy = false;
@@ -246,7 +250,7 @@ public final class NeovimGrid {
         highlightsShared = true;
         return new Frame(columns, rows, text.clone(), attributes.clone(), wrapped.clone(), highlights, foreground,
                 background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy,
-                linespace, guifontSize, modeName);
+                linespace, guifontSize, guifontSets, modeName);
     }
 
     /** The {@code :hN} size of the first 'guifont' entry, or 0. Font names are ignored. */
@@ -310,6 +314,8 @@ public final class NeovimGrid {
         /** UI options: 'linespace', and the 'guifont' size (0 when unset). */
         public final int linespace;
         public final float guifontSize;
+        /** Counts 'guifont' option_set events, which Neovim also sends when the value is unchanged. */
+        public final int guifontSets;
         private final String[][] text;
         private final int[][] attributes;
         private final boolean[] wrapped;
@@ -318,13 +324,13 @@ public final class NeovimGrid {
         Frame(int columns, int rows, String[][] text, int[][] attributes, boolean[] wrapped, Highlight[] highlights,
                 int foreground, int background, int special, int cursorRow, int cursorColumn,
                 String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy, int linespace, float guifontSize,
-                String mode) {
+                int guifontSets, String mode) {
             this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes; this.wrapped = wrapped;
             this.highlights = highlights; this.foreground = foreground; this.background = background;
             this.special = special; this.cursorRow = cursorRow; this.cursorColumn = cursorColumn;
             this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage;
             this.cursorAttribute = cursorAttribute; this.busy = busy;
-            this.linespace = linespace; this.guifontSize = guifontSize; this.mode = mode;
+            this.linespace = linespace; this.guifontSize = guifontSize; this.guifontSets = guifontSets; this.mode = mode;
         }
         public String text(int row, int column) { return text[row][column]; }
         public int attribute(int row, int column) { return attributes[row][column]; }

@@ -213,9 +213,14 @@ public class NeovimGridTest {
                 event("option_set", "ext_cmdline", false)));
         assertEquals(0, grid.frame().linespace);
         assertEquals(0, grid.frame().guifontSize, 0);
+        assertEquals(0, grid.frame().guifontSets);
         grid.handleRedraw(List.of(flush()));
         assertEquals(3, grid.frame().linespace);
         assertEquals(12.5f, grid.frame().guifontSize, 0);
+        assertEquals(1, grid.frame().guifontSets);
+        // Neovim repeats option_set for an unchanged value, which must still be seen.
+        grid.handleRedraw(List.of(event("option_set", "guifont", "Fira Code:h12.5:b,Mono:h9"), flush()));
+        assertEquals(2, grid.frame().guifontSets);
         assertEquals(16, NeovimGrid.guifontSize(":h16"), 0);
         assertEquals(0, NeovimGrid.guifontSize("Monospace"), 0);
         assertEquals(0, NeovimGrid.guifontSize(":w8:hx,Mono:h9"), 0);

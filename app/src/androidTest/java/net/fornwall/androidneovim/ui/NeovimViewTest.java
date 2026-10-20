@@ -517,6 +517,25 @@ public class NeovimViewTest {
         });
     }
 
+    @Test public void repeatedGuifontUndoesAPinchAndOptionsResizeOnce() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            ResizeLog log = new ResizeLog();
+            view.setListener(log);
+            view.layout(0, 0, 1000, 1000);
+            log.sizes.clear();
+            view.handleRedraw(List.of(List.of("option_set", List.of("linespace", 4), List.of("guifont", ":h20")),
+                    List.of("flush", List.of())));
+            assertEquals(20, view.fontSize(), 0);
+            assertEquals(List.of(view.columns() + "x" + view.rows()), log.sizes);
+            view.setFontSize(16);
+            view.handleRedraw(List.of(List.of("option_set", List.of("guifont", ":h20")), List.of("flush", List.of())));
+            assertEquals(20, view.fontSize(), 0);
+            assertEquals(3, log.sizes.size());
+        });
+    }
+
     @Test public void pinchScalesTheFrameAndResizesOnceAtTheEnd() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         instrumentation.runOnMainSync(() -> {

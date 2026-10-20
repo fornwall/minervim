@@ -80,7 +80,7 @@ public final class NeovimView extends View {
     private float cellHeight;
     private float baseline;
     private int linespace;
-    private float guifontSize;
+    private int guifontSets;
     private float curlAmplitude, curlMiddle;
     private float underlineTop, doubleUnderlineTop, underlineThickness, strikeTop, strikeThickness;
     private Listener listener;
@@ -220,15 +220,19 @@ public final class NeovimView extends View {
         if (!grid.handleRedraw(events)) return;
         NeovimGrid.Frame frame = grid.frame();
         if (run.length < frame.columns) run = new char[frame.columns];
-        // UI options change the cell metrics together with the frame that follows them.
-        if (frame.linespace != linespace) {
-            linespace = frame.linespace;
+        // UI options change the cell metrics together with the frame that follows them. Every 'guifont'
+        // option_set applies its size, so setting the same value again undoes a pinch.
+        boolean metrics = frame.linespace != linespace;
+        linespace = frame.linespace;
+        if (frame.guifontSets != guifontSets) {
+            guifontSets = frame.guifontSets;
+            float size = clampFontSize(frame.guifontSize > 0 ? frame.guifontSize : savedFontSize());
+            metrics |= size != fontSize;
+            fontSize = size;
+        }
+        if (metrics) {
             applyFontSize();
             updateGridSize();
-        }
-        if (frame.guifontSize != guifontSize) {
-            guifontSize = frame.guifontSize;
-            setFontSize(guifontSize > 0 ? guifontSize : savedFontSize());
         }
         updateInputMode();
         postInvalidateOnAnimation();

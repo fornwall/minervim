@@ -116,7 +116,9 @@ IME surrounding-text behavior are future work.
   holds back later input. Unsent UI resizes coalesce.
   Android integration Lua lives in `app/src/main/assets/android/init.lua`.
 - `Documents`: local copies of Android documents and write-back to originals.
-- `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure.
+- `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure. A
+  message that cannot be encoded, or a failing notification handler, affects only
+  that message.
 - `ui/`: UI-owned grid, complete-frame publication on Neovim `flush`, drawing,
   Android input, and basic accessibility.
 

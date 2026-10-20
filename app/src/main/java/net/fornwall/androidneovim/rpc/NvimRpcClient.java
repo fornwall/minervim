@@ -17,6 +17,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** Stream-based MessagePack RPC. Supply a serial executor to preserve UI notification order. */
 public final class NvimRpcClient implements Closeable {
@@ -39,6 +41,7 @@ public final class NvimRpcClient implements Closeable {
         public Object error() { return error; }
     }
 
+    private static final Logger LOG = Logger.getLogger(NvimRpcClient.class.getName());
     private static final int MAX_PENDING = 256;
     private static final int CALLBACK_KIB = 16 * 1024;
     private static final int READ_BUFFER = 64 * 1024;
@@ -118,13 +121,40 @@ public final class NvimRpcClient implements Closeable {
             while (!closed.get()) {
                 List<?> message = outgoing.take();
                 // Validate/encode the whole frame before changing the transport stream.
-                ByteArrayOutputStream encoded = new ByteArrayOutputStream();
-                MessagePack.write(encoded, message);
+                ByteArrayOutputStream encoded = encode(message);
+                if (encoded == null) continue;
                 encoded.writeTo(output);
                 output.flush();
             }
         } catch (Exception error) {
             fail(error);
+        }
+    }
+
+    /** A message that cannot be encoded fails alone: a request's future, or a reply, sent as an error. */
+    private ByteArrayOutputStream encode(List<?> message) throws IOException {
+        ByteArrayOutputStream encoded = new ByteArrayOutputStream();
+        try {
+            MessagePack.write(encoded, message);
+            return encoded;
+        } catch (IOException | RuntimeException error) {
+            long kind = (Long) message.get(0);
+            if (kind == 0) {
+                CompletableFuture<Object> future = pending.remove((Long) message.get(1));
+                if (future != null) {
+                    pendingSlots.release();
+                    future.completeExceptionally(error);
+                }
+                return null;
+            }
+            if (kind == 1) {
+                encoded.reset();
+                MessagePack.write(encoded, Arrays.asList(1L, message.get(1),
+                        List.of(0L, "Android UI cannot encode the reply: " + error.getMessage()), null));
+                return encoded;
+            }
+            LOG.log(Level.WARNING, "Dropped an RPC notification that cannot be encoded", error);
+            return null;
         }
     }
 
@@ -170,8 +200,9 @@ public final class NvimRpcClient implements Closeable {
             callbackExecutor.execute(() -> {
                 try {
                     if (!closed.get()) listener.onNotification(method, args);
-                } catch (Exception error) {
-                    fail(error);
+                } catch (RuntimeException error) {
+                    // One broken event must not end the only editor session.
+                    LOG.log(Level.WARNING, "RPC notification handler failed: " + method, error);
                 } finally {
                     callbackMemory.release(kib);
                     callbackSlots.release();

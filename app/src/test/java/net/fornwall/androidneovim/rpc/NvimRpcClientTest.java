@@ -37,12 +37,12 @@ public class NvimRpcClientTest {
         final CompletableFuture<Object> later = new CompletableFuture<>();
         final NvimRpcClient client;
 
-        Peer() throws IOException { this(Runnable::run, false); }
+        Peer() throws IOException { this(Runnable::run); }
 
-        Peer(Executor executor, boolean failNotification) throws IOException {
+        Peer(Executor executor) throws IOException {
             client = new NvimRpcClient(new BlockReads(inbound), outbound, executor, new NvimRpcClient.Listener() {
                 @Override public void onNotification(String method, List<?> arguments) {
-                    if (failNotification) throw new IllegalStateException("Broken UI callback");
+                    if (method.equals("broken")) throw new IllegalStateException("Broken UI callback");
                     notifications.add(List.of(method, arguments));
                 }
                 @Override public void onClosed(Throwable cause) { closed.complete(cause); }
@@ -51,6 +51,7 @@ public class NvimRpcClientTest {
                         case "echo" -> CompletableFuture.completedFuture(arguments);
                         case "later" -> later;
                         case "broken" -> throw new IllegalStateException("broken handler");
+                        case "unencodable" -> CompletableFuture.completedFuture(new Object());
                         default -> null;
                     };
                 }
@@ -169,19 +170,54 @@ public class NvimRpcClientTest {
         }
     }
 
-    @Test(timeout = 5000) public void callbackFailureClosesAndFailsPendingRequests() throws Exception {
-        try (Peer peer = new Peer(Runnable::run, true)) {
+    @Test(timeout = 5000) public void notificationHandlerFailureDoesNotClose() throws Exception {
+        try (Peer peer = new Peer()) {
             CompletableFuture<Object> pending = peer.client.request("nvim_get_mode");
-            peer.read();
+            List<?> request = peer.read();
+            peer.send(List.of(2L, "broken", List.of()));
             peer.send(List.of(2L, "redraw", List.of()));
-            assertTrue(peer.closed.get(2, TimeUnit.SECONDS) instanceof IllegalStateException);
-            assertTrue(pending.isCompletedExceptionally());
+            assertEquals(List.of("redraw", List.of()), peer.notifications.poll(2, TimeUnit.SECONDS));
+            peer.send(Arrays.asList(1L, request.get(1), null, "normal"));
+            assertEquals("normal", pending.get(2, TimeUnit.SECONDS));
+            assertFalse(peer.client.isClosed());
+        }
+    }
+
+    @Test(timeout = 5000) public void unencodableRequestFailsOnlyItselfAndReleasesItsSlot() throws Exception {
+        try (Peer peer = new Peer()) {
+            List<String> lines = Collections.nCopies(300_000, "");
+            for (int i = 0; i < 300; i++) {
+                CompletableFuture<Object> bad = i % 2 == 0 ? peer.client.request("nvim_put", lines)
+                        : peer.client.request("nvim_eval", new Object());
+                assertThrows(ExecutionException.class, () -> bad.get(2, TimeUnit.SECONDS));
+            }
+            CompletableFuture<Object> good = peer.client.request("nvim_eval", "1");
+            List<?> frame = peer.read();
+            assertEquals("nvim_eval", frame.get(2));
+            assertEquals(List.of("1"), frame.get(3));
+            peer.send(Arrays.asList(1L, frame.get(1), null, 1L));
+            assertEquals(1L, good.get(2, TimeUnit.SECONDS));
+            assertFalse(peer.client.isClosed());
+        }
+    }
+
+    @Test(timeout = 5000) public void unencodableReplyIsAnsweredWithAnError() throws Exception {
+        try (Peer peer = new Peer()) {
+            peer.send(List.of(0L, 7L, "unencodable", List.of()));
+            List<?> reply = peer.read();
+            assertEquals(1L, reply.get(0));
+            assertEquals(7L, reply.get(1));
+            assertEquals(0L, ((List<?>) reply.get(2)).get(0));
+            assertNull(reply.get(3));
+            peer.send(List.of(0L, 8L, "echo", List.of("next")));
+            assertEquals(Arrays.asList(1L, 8L, null, List.of("next")), peer.read());
+            assertFalse(peer.client.isClosed());
         }
     }
 
     @Test(timeout = 5000) public void slowUiCannotAccumulateUnboundedCallbacks() throws Exception {
         BlockingQueue<Runnable> callbacks = new LinkedBlockingQueue<>();
-        try (Peer peer = new Peer(callbacks::add, false)) {
+        try (Peer peer = new Peer(callbacks::add)) {
             for (int i = 0; i < 64; i++) peer.send(List.of(2L, "redraw", List.of()));
             List<Runnable> held = new ArrayList<>();
             for (int i = 0; i < 32; i++) {

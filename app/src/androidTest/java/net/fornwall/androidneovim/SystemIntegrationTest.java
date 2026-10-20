@@ -46,11 +46,17 @@ public final class SystemIntegrationTest {
         configure("vim.api.nvim_create_autocmd('BufReadPost', { pattern = '*/notes.txt', "
                 + "callback = function() error('BrokenConfigMarker') end })");
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
-            await(() -> screen(activity).replace("\n", "").contains("BrokenConfigMarker"));
-            // The multi-line error waits at a hit-enter prompt, which keys still reach.
-            assertEquals(Boolean.TRUE, ((Map<?, ?>) request("nvim_get_mode")).get("blocking"));
+            // The error waits at a hit-enter prompt, which keys still reach.
+            await(() -> {
+                try { return Boolean.TRUE.equals(((Map<?, ?>) request("nvim_get_mode")).get("blocking")); }
+                catch (Exception starting) { return false; }
+            });
+            await(() -> screen(activity).replace("\n", "").contains("Android setup"));
             request("nvim_input", "<CR>");
             awaitUi();
+            // However the screen wrapped the error, :messages has all of it.
+            assertTrue(((String) request("nvim_exec_lua", "return vim.fn.execute('messages')", List.of()))
+                    .contains("BrokenConfigMarker"));
             assertTrue(String.valueOf(request("nvim_buf_get_name", 0)).endsWith("notes.txt"));
             // Steps after the failing one still ran, and documents can be opened.
             assertEquals(context.getFilesDir().getCanonicalPath(), request("nvim_call_function", "getcwd", List.of()));

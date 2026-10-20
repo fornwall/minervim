@@ -65,7 +65,7 @@ public final class MainActivity extends Activity {
         action(toolbar, "Paste", "Paste clipboard into Neovim", () -> editor.pasteClipboard());
         action(toolbar, "Keys", "Show the software keyboard", () -> editor.showKeyboard());
         root.addView(toolbar);
-        editor = new NeovimView(this);
+        editor = new NeovimView(this, session.grid);
         editor.setId(View.generateViewId());
         root.addView(editor, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout extraKeys = row();
@@ -240,7 +240,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        session.detach(editor);
+        session.detach(editor, isFinishing());
         super.onDestroy();
     }
 }

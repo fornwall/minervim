@@ -8,7 +8,10 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <!-- Size and keyboard changes only re-measure the editor. Theme, density and font scale
+             changes recreate the Activity, while Neovim's UI stays attached. -->
         <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

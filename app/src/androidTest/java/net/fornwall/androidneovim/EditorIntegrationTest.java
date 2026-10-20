@@ -331,7 +331,7 @@ public final class EditorIntegrationTest {
     }
 
     /** Waits until the UI is attached and the application's initial file has opened. */
-    private static void awaitUi(EditorSession session) throws Exception {
+    static void awaitUi(EditorSession session) throws Exception {
         await(() -> {
             try { return !((List<?>) request(session, "nvim_list_uis")).isEmpty(); }
             catch (Exception starting) { return false; }
@@ -345,21 +345,21 @@ public final class EditorIntegrationTest {
         return value.get();
     }
 
-    private static String screen(ActivityScenario<MainActivity> activity) {
+    static String screen(ActivityScenario<MainActivity> activity) {
         AtomicReference<String> text = new AtomicReference<>();
         activity.onActivity(a -> text.set(a.editorView().screenText()));
         return text.get();
     }
 
-    private static Object request(EditorSession session, String method, Object... args) throws Exception {
+    static Object request(EditorSession session, String method, Object... args) throws Exception {
         AtomicReference<CompletableFuture<Object>> future = new AtomicReference<>();
         InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> future.set(session.request(method, args)));
         return future.get().get(10, TimeUnit.SECONDS);
     }
 
-    private interface Condition { boolean get() throws Exception; }
+    interface Condition { boolean get() throws Exception; }
 
-    private static void await(Condition condition) throws Exception {
+    static void await(Condition condition) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
         while (!condition.get()) {
             if (System.nanoTime() > deadline) fail("Timed out waiting for editor state");

@@ -66,8 +66,8 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   and ShaDa (history, registers, marks, `:oldfiles`) is saved. Set
   `vim.g.android_autosave = false` to disable the writes. On the next start the
   most recent file in app storage reopens. Persistent undo is on by default.
-- Neovim's `background` follows the system dark/light theme on each attach unless
-  `vim.g.android_follow_system_theme = false`.
+- Neovim's `background` follows the system dark/light theme, also when it changes
+  while the editor is open, unless `vim.g.android_follow_system_theme = false`.
 - Neovim starts normally: `:e $MYVIMRC` edits
   `files/config/nvim/init.lua`, and bundled runtime plugins (`:Tutor`, netrw,
   matchparen, editorconfig, ...) load. The app's defaults (`number`, `mouse`,
@@ -116,7 +116,10 @@ IME surrounding-text behavior are future work.
   runtime extraction, UI attachment, and clipboard. `EditorCommands` orders
   requests after earlier input and retries input byte-exactly. Neovim defers most
   requests while it waits at a prompt or for a pending key, so a sent request never
-  holds back later input. Unsent UI resizes coalesce.
+  holds back later input. Unsent UI resizes coalesce. The UI attaches once the view
+  is laid out. Rotation and keyboard changes resize it in place; a recreated
+  Activity keeps the UI attached, and its new view draws the session's last
+  complete frame.
   Android integration Lua lives in `app/src/main/assets/android/init.lua`.
 - `Documents`: local copies of Android documents and write-back to originals.
 - `rpc/`: bounded MessagePack codec and asynchronous RPC with backpressure. A

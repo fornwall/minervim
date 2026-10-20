@@ -3,7 +3,6 @@ package net.fornwall.androidneovim;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Handler;
@@ -21,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import net.fornwall.androidneovim.rpc.NvimRpcClient;
+import net.fornwall.androidneovim.ui.NeovimGrid;
 import net.fornwall.androidneovim.ui.NeovimView;
 
 /** Owns one native editor for the application lifetime; Android view state stays on the main thread. */
@@ -39,12 +39,16 @@ final class EditorSession implements NeovimView.Listener {
     private final Handler main = new Handler(Looper.getMainLooper());
     final ExecutorService files = Executors.newSingleThreadExecutor(r -> new Thread(r, "editor-files"));
     final Documents documents;
+    /** The attached UI's grid. It outlives a recreated Activity, whose new view draws the last frame at once. */
+    final NeovimGrid grid;
     private NvimRpcClient rpc;
     private EditorCommands commands;
     private NeovimView view;
     private Observer observer;
     private boolean started;
     private boolean attached;
+    private int uiColumns;
+    private int uiRows;
     private boolean initialized;
     private final CompletableFuture<Void> ready = new CompletableFuture<>();
     private String status = "Starting Neovim…";
@@ -57,28 +61,36 @@ final class EditorSession implements NeovimView.Listener {
     EditorSession(Context context) {
         this.context = context.getApplicationContext();
         documents = new Documents(this.context, files);
+        grid = new NeovimGrid(NeovimView.darkTheme(this.context));
     }
 
+    /** Shows the editor in a view of {@link #grid}. The UI attaches, or resizes, once the view is laid out. */
     void attach(NeovimView next, Observer nextObserver) {
-        if (view != null && view != next) detach(view);
+        if (view != null && view != next) detach(view, false);
         view = next;
         observer = nextObserver;
-        next.setListener(this);
         nextObserver.onStatus(status, statusReady);
-        if (rpc != null) attachUi();
+        // A recreated Activity may follow a new system theme.
+        if (attached) theme(next);
+        next.setListener(this);
         if (!started) {
             started = true;
             files.execute(this::start);
         }
     }
 
-    void detach(NeovimView previous) {
+    /**
+     * Releases a view. A recreated Activity keeps the UI attached: detaching and attaching again would
+     * resize Neovim twice and rearrange its windows. Redraws meanwhile still update the grid.
+     */
+    void detach(NeovimView previous, boolean finishing) {
         if (view != previous) return;
         previous.setListener(null);
         view = null;
         observer = null;
-        if (rpc != null && attached) request("nvim_ui_detach");
+        if (!finishing || !attached) return;
         attached = false;
+        request("nvim_ui_detach");
     }
 
     private void start() {
@@ -136,7 +148,10 @@ final class EditorSession implements NeovimView.Listener {
                         @Override
                         public void onNotification(String method, List<?> args) {
                             switch (method) {
-                                case "redraw" -> { if (view != null) view.handleRedraw(args); }
+                                case "redraw" -> {
+                                    if (view != null) view.handleRedraw(args);
+                                    else grid.handleRedraw(args);
+                                }
                                 case "android_clipboard_set" -> copy(args);
                                 case "android_document_written" -> {
                                     if (!args.isEmpty() && args.get(0) instanceof String written) documentWritten(new File(written));
@@ -177,7 +192,10 @@ final class EditorSession implements NeovimView.Listener {
                                 ready.completeExceptionally(error);
                             } else {
                                 initialized = true;
-                                attachUi();
+                                // Hiding the status row resizes the view. A posted task runs after that
+                                // layout, so the UI attaches at the final size.
+                                setStatus(READY, true);
+                                main.post(this::attachUi);
                                 ready.complete(null);
                             }
                         }));
@@ -237,24 +255,26 @@ final class EditorSession implements NeovimView.Listener {
         }
     }
 
+    /** Attaches at the laid-out size; a placeholder size followed by a resize would rearrange windows. */
     private void attachUi() {
-        if (view == null || rpc == null || attached || !initialized) return;
         NeovimView target = view;
+        if (target == null || target.columns() < 1 || rpc == null || attached || !initialized) return;
         attached = true;
-        int night = target.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        request("nvim_exec_lua", "AndroidNeovim.theme(...)", List.of(night != Configuration.UI_MODE_NIGHT_NO));
-        request("nvim_ui_attach", Math.max(1, target.columns()), Math.max(1, target.rows()),
-                Map.of("rgb", true, "ext_linegrid", true, "ext_multigrid", false))
+        theme(target);
+        uiColumns = target.columns();
+        uiRows = target.rows();
+        request("nvim_ui_attach", uiColumns, uiRows, Map.of("rgb", true, "ext_linegrid", true, "ext_multigrid", false))
                 .whenComplete((ignored, error) -> main.post(() -> {
-                    if (view != target) return;
-                    if (error != null) {
-                        attached = false;
-                        setStatus("Editor setup failed: " + error.getMessage(), false);
-                    }
-                    else setStatus(READY, true);
+                    if (error == null) return;
+                    attached = false;
+                    setStatus("Editor setup failed: " + error.getMessage(), false);
                 }));
         // Later window focus changes come from the view.
         if (target.hasWindowFocus()) request("nvim_ui_set_focus", true);
+    }
+
+    private void theme(NeovimView target) {
+        request("nvim_exec_lua", "AndroidNeovim.theme(...)", List.of(NeovimView.darkTheme(target.getContext())));
     }
 
     CompletableFuture<Object> request(String method, Object... args) {
@@ -357,7 +377,12 @@ final class EditorSession implements NeovimView.Listener {
 
     @Override
     public void resize(int cols, int rows) {
-        if (attached) request("nvim_ui_try_resize", cols, rows);
+        if (!attached) attachUi();
+        else if (cols != uiColumns || rows != uiRows) {
+            uiColumns = cols;
+            uiRows = rows;
+            request("nvim_ui_try_resize", cols, rows);
+        }
     }
 
     private void setStatus(String message, boolean ready) {

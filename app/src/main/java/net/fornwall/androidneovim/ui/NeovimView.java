@@ -55,9 +55,7 @@ public final class NeovimView extends View {
     private static final int MAX_IME_DELETE = 256;
     // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
     private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
-    // The system theme picks Neovim's 'background', so frames before its colors arrive match it.
-    private final NeovimGrid grid = new NeovimGrid((getResources().getConfiguration().uiMode
-            & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_NO);
+    private final NeovimGrid grid;
     private final Paint[] textPaints = new Paint[4];
     private final int[] maximumRun = new int[4];
     private final float[] textScales = new float[4];
@@ -84,8 +82,8 @@ public final class NeovimView extends View {
     private ModifierListener modifierListener;
     private boolean stickyCtrl;
     private boolean stickyAlt;
-    private int columns = 80;
-    private int rows = 24;
+    private int columns;
+    private int rows;
     private int connectionGeneration;
     private boolean textEntry;
     private int pendingAccent;
@@ -108,8 +106,18 @@ public final class NeovimView extends View {
     private float downX, downY, lastX, lastY, scrollX, scrollY;
     private int touchRow, touchColumn, flingX, flingY;
 
-    public NeovimView(Context context) {
+    public NeovimView(Context context) { this(context, new NeovimGrid(darkTheme(context))); }
+
+    /** A view of {@code grid}, which can already hold a complete frame from an earlier view. */
+    public NeovimView(Context context, NeovimGrid grid) {
         super(context);
+        this.grid = grid;
+        // That frame's UI options and mode apply at once, as if it had just been flushed.
+        NeovimGrid.Frame frame = grid.frame();
+        if (run.length < frame.columns) run = new char[frame.columns];
+        linespace = frame.linespace;
+        guifontSets = frame.guifontSets;
+        textEntry = editsText(frame.mode);
         setFocusable(true);
         setFocusableInTouchMode(true);
         setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
@@ -123,7 +131,7 @@ public final class NeovimView extends View {
         }
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
-        fontSize = savedFontSize();
+        fontSize = clampFontSize(frame.guifontSize > 0 ? frame.guifontSize : savedFontSize());
         applyFontSize();
         ViewConfiguration configuration = ViewConfiguration.get(context);
         touchSlop = configuration.getScaledTouchSlop();
@@ -146,6 +154,14 @@ public final class NeovimView extends View {
             }
         });
         scaleDetector.setQuickScaleEnabled(false);
+    }
+
+    /**
+     * Whether the system theme is dark. It picks Neovim's 'background', so a new grid's frames match it
+     * until Neovim's colors arrive.
+     */
+    public static boolean darkTheme(Context context) {
+        return (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_NO;
     }
 
     private static float clampFontSize(float size) { return Float.isNaN(size) ? 14 : Math.max(8, Math.min(32, size)); }
@@ -209,6 +225,7 @@ public final class NeovimView extends View {
         this.listener = listener;
         if (listener != null && getWidth() > 0 && getHeight() > 0) listener.resize(columns, rows);
     }
+    /** The grid size that fits this view, or 0 before its first layout. */
     public int columns() { return columns; }
     public int rows() { return rows; }
 

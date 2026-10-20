@@ -304,15 +304,25 @@ public final class SystemIntegrationTest {
 
     @Test
     public void startupRemovesTemporaryDirectoriesOfEarlierProcesses() throws Exception {
-        File stale = new File(context.getFilesDir(), "tmp/nvim.user/AbCdEf");
-        Files.createDirectories(stale.toPath());
-        Files.writeString(new File(stale, "0").toPath(), "stale");
+        File stale = new File(context.getCacheDir(), "nvim.user/AbCdEf");
+        // Earlier versions kept TMPDIR and XDG_CACHE_HOME in files/tmp, which users may also save to.
+        File legacy = new File(context.getFilesDir(), "tmp/nvim.user/AbCdEf");
+        File legacyCache = new File(context.getFilesDir(), "tmp/nvim/luac");
+        File saved = new File(context.getFilesDir(), "tmp/todo.txt");
+        for (File directory : List.of(stale, legacy, legacyCache)) {
+            Files.createDirectories(directory.toPath());
+            Files.writeString(new File(directory, "0").toPath(), "stale");
+        }
+        Files.writeString(saved.toPath(), "kept");
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             awaitUi();
             assertFalse(stale.getParentFile().exists());
+            assertFalse(legacy.getParentFile().exists());
+            assertFalse(legacyCache.getParentFile().exists());
+            assertEquals("kept", Files.readString(saved.toPath()));
             String temporary = (String) request("nvim_call_function", "tempname", List.of());
-            assertTrue(temporary, temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getPath())
-                    || temporary.startsWith(new File(context.getFilesDir(), "tmp/nvim.").getCanonicalPath()));
+            assertTrue(temporary, temporary.startsWith(new File(context.getCacheDir(), "nvim.").getPath())
+                    || temporary.startsWith(new File(context.getCacheDir(), "nvim.").getCanonicalPath()));
         }
     }
 

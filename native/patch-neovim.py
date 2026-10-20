@@ -87,6 +87,11 @@ replace('src/nvim/os/signal.c', 'void signal_start(void)\n{', '''void signal_sta
 #ifdef __ANDROID__
   return;
 #endif''')
+# Keep the signal mask the editor thread inherits from ART, which blocks SIGPIPE,
+# SIGQUIT and SIGUSR1 so that socket writes fail with EPIPE and trace dumps reach
+# ART's signal catcher. Upstream clears it for subprocesses, which are disabled here.
+replace('src/nvim/os/signal.c', '#ifndef MSWIN\n  // Ensure a clean slate by unblocking all signals.',
+        '#if !defined(MSWIN) && !defined(__ANDROID__)\n  // Ensure a clean slate by unblocking all signals.')
 
 # Reject PTYs before Neovim changes process-wide SIGCHLD/stdio state.
 replace('src/nvim/os/pty_proc_unix.c',

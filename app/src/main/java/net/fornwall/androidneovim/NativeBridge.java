@@ -7,7 +7,7 @@ final class NativeBridge {
 
     private NativeBridge() {}
 
-    static native void start(String filesDir, String socketPath);
+    static native void start(String filesDir, String cacheDir, String socketPath);
 
     static native String failure();
 

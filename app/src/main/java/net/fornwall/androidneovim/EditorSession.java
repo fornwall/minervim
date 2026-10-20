@@ -118,11 +118,19 @@ final class EditorSession implements NeovimView.Listener {
             }
             // Neovim has not started, so no buffer holds a copy that is deleted now.
             documents.prune();
-            // Neovim's temporary directories under TMPDIR (files/tmp) outlive a process that Android ends.
-            File[] temporary = new File(home, "tmp").listFiles((directory, name) -> name.startsWith("nvim."));
-            if (temporary != null) {
-                for (File stale : temporary) try { FileTrees.delete(stale); } catch (IOException ignored) { }
+            // TMPDIR and XDG_CACHE_HOME are the cache directory. Neovim's temporary directories outlive a
+            // process that Android ends. Earlier versions used files/tmp for both, which is also under
+            // $HOME, so only Neovim's entries are removed there.
+            File cache = context.getCacheDir();
+            File legacy = new File(home, "tmp");
+            for (File directory : new File[] { cache, legacy }) {
+                File[] stale = directory.listFiles((parent, name) ->
+                        name.startsWith("nvim.") || (parent.equals(legacy) && name.equals("nvim")));
+                if (stale != null) {
+                    for (File entry : stale) try { FileTrees.delete(entry); } catch (IOException ignored) { }
+                }
             }
+            try { Files.deleteIfExists(legacy.toPath()); } catch (IOException notEmpty) { }
             File notes = new File(home, "notes.txt");
             if (!notes.exists()) {
                 Files.writeString(notes.toPath(), "Welcome to Neovim on Android.\n\n"
@@ -142,7 +150,7 @@ final class EditorSession implements NeovimView.Listener {
                 init = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
             String path = new File(home, "nvim.sock").getAbsolutePath();
-            NativeBridge.start(home.getAbsolutePath(), path);
+            NativeBridge.start(home.getAbsolutePath(), cache.getAbsolutePath(), path);
             long deadline = System.nanoTime() + 20_000_000_000L;
             while (true) {
                 String failure = NativeBridge.failure();

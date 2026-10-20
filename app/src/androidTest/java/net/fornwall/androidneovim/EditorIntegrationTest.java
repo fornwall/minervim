@@ -319,6 +319,26 @@ public final class EditorIntegrationTest {
     }
 
     @Test
+    public void editorThreadKeepsArtSignalsBlockedAndUsesTheCacheDirectory() throws Exception {
+        int process = Process.myPid();
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            // SIGQUIT, SIGUSR1 and SIGPIPE (0x1204) stay blocked, so writing to a closed pipe fails
+            // with EPIPE instead of ending Android's process.
+            assertEquals(List.of(true, "EPIPE", context.getCacheDir().getAbsolutePath()), request(session,
+                    "nvim_exec_lua", "local f = assert(io.open('/proc/thread-self/status')); "
+                    + "local status = f:read('*a'); f:close(); "
+                    + "local mask = tonumber(status:match('SigBlk:%s*%x-(%x%x%x%x%x%x%x%x)\\n'), 16); "
+                    + "local fds = assert(vim.uv.pipe()); vim.uv.fs_close(fds.read); "
+                    + "local _, _, err = vim.uv.fs_write(fds.write, 'x'); vim.uv.fs_close(fds.write); "
+                    + "return {bit.band(mask, 0x1204) == 0x1204, err, vim.env.TMPDIR}", List.of()));
+            assertEquals(process, Process.myPid());
+        }
+    }
+
+    @Test
     public void identifiesItselfToNeovimAsAUi() throws Exception {
         var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         EditorSession session = ((EditorApplication) context.getApplicationContext()).session();

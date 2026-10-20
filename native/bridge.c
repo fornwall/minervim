@@ -4,6 +4,7 @@
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,7 +18,7 @@ static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t failed = PTHREAD_COND_INITIALIZER;
 static bool started;
 static char failure_message[256];
-struct startup { char *files; char *socket; };
+struct startup { char *files; char *cache; char *socket; };
 
 static void fail(const char *message) {
   pthread_mutex_lock(&state_lock);
@@ -39,24 +40,31 @@ __attribute__((noreturn)) void __wrap__exit(int status) { __wrap_exit(status); }
 
 static void *run_editor(void *opaque) {
   pthread_setname_np(pthread_self(), "neovim-core");
+  // ART blocks these in every thread: socket writes then fail with EPIPE, and trace
+  // dumps reach its signal catcher. Keep them blocked whichever thread started Neovim.
+  sigset_t blocked;
+  sigemptyset(&blocked);
+  sigaddset(&blocked, SIGPIPE);
+  sigaddset(&blocked, SIGQUIT);
+  sigaddset(&blocked, SIGUSR1);
+  pthread_sigmask(SIG_BLOCK, &blocked, NULL);
   struct startup *args = opaque;
-  char *runtime = NULL, *tmp = NULL, *config = NULL;
+  char *runtime = NULL, *config = NULL;
   asprintf(&runtime, "%s/runtime", args->files);
-  asprintf(&tmp, "%s/tmp", args->files);
   asprintf(&config, "%s/config", args->files);
-  if (!runtime || !tmp || !config) {
+  if (!runtime || !config) {
     fail("Unable to allocate Neovim startup paths");
     return NULL;
   }
-  mkdir(tmp, 0700);
   mkdir(config, 0700);
   setenv("HOME", args->files, 1);
   setenv("VIMRUNTIME", runtime, 1);
-  setenv("TMPDIR", tmp, 1);
+  // Temporary and cache files go where Android may reclaim them.
+  setenv("TMPDIR", args->cache, 1);
   setenv("XDG_CONFIG_HOME", config, 1);
   setenv("XDG_DATA_HOME", args->files, 1);
   setenv("XDG_STATE_HOME", args->files, 1);
-  setenv("XDG_CACHE_HOME", tmp, 1);
+  setenv("XDG_CACHE_HOME", args->cache, 1);
   setenv("SHELL", "/system/bin/sh", 1);
   unlink(args->socket);
   // Normal startup: the user's $XDG_CONFIG_HOME/nvim config, bundled runtime plugins and ShaDa.
@@ -64,28 +72,37 @@ static void *run_editor(void *opaque) {
                    "--cmd", "set noswapfile shell=/system/bin/sh", NULL };
   nvim_main(6, argv);
   fail("Neovim stopped. Restart the app to start a new editor.");
-  free(runtime); free(tmp); free(config);
-  free(args->files); free(args->socket); free(args);
+  free(runtime); free(config);
+  free(args->files); free(args->cache); free(args->socket); free(args);
   return NULL;
+}
+
+static char *copy_string(JNIEnv *env, jstring value) {
+  const char *chars = (*env)->GetStringUTFChars(env, value, NULL);
+  if (!chars) return NULL;
+  char *copy = strdup(chars);
+  (*env)->ReleaseStringUTFChars(env, value, chars);
+  return copy;
 }
 
 JNIEXPORT void JNICALL
 Java_net_fornwall_androidneovim_NativeBridge_start(JNIEnv *env, jclass type,
-                                                 jstring files_dir, jstring socket_path) {
+                                                 jstring files_dir, jstring cache_dir, jstring socket_path) {
   (void)type;
   pthread_mutex_lock(&state_lock);
   if (started) { pthread_mutex_unlock(&state_lock); return; }
   started = true;
   pthread_mutex_unlock(&state_lock);
-  const char *files = (*env)->GetStringUTFChars(env, files_dir, NULL);
-  if (!files) return;
-  const char *socket = (*env)->GetStringUTFChars(env, socket_path, NULL);
-  if (!socket) { (*env)->ReleaseStringUTFChars(env, files_dir, files); return; }
   struct startup *args = calloc(1, sizeof *args);
-  if (args) { args->files = strdup(files); args->socket = strdup(socket); }
-  (*env)->ReleaseStringUTFChars(env, files_dir, files);
-  (*env)->ReleaseStringUTFChars(env, socket_path, socket);
-  if (!args || !args->files || !args->socket) { fail("Unable to allocate Neovim startup state"); return; }
+  // Stop at the first failed copy: GetStringUTFChars may leave an OutOfMemoryError pending.
+  if (args && (args->files = copy_string(env, files_dir)) && (args->cache = copy_string(env, cache_dir))) {
+    args->socket = copy_string(env, socket_path);
+  }
+  if (!args || !args->socket) {
+    if (args) { free(args->files); free(args->cache); free(args); }
+    fail("Unable to allocate Neovim startup state");
+    return;
+  }
   pthread_t thread;
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);

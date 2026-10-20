@@ -137,7 +137,9 @@ public final class NeovimView extends View {
         }
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
-        fontSize = clampFontSize(frame.guifontSize > 0 ? frame.guifontSize : savedFontSize());
+        // An earlier view's size, such as a pinch, stands until a later 'guifont' option_set.
+        fontSize = grid.viewGuifontSets == frame.guifontSets ? grid.viewFontSize
+                : clampFontSize(frame.guifontSize > 0 ? frame.guifontSize : savedFontSize());
         applyFontSize();
         ViewConfiguration configuration = ViewConfiguration.get(context);
         touchSlop = configuration.getScaledTouchSlop();
@@ -187,6 +189,8 @@ public final class NeovimView extends View {
     public float fontSize() { return fontSize; }
 
     private void applyFontSize() {
+        grid.viewFontSize = fontSize;
+        grid.viewGuifontSets = guifontSets;
         float textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSize, getResources().getDisplayMetrics());
         for (Paint paint : textPaints) { paint.setTextSize(textSize); paint.setTextScaleX(1); }
         // Keep fractional advances, matching android-ssh's TerminalMetrics approach.

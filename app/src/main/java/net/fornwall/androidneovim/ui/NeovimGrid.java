@@ -34,6 +34,12 @@ public final class NeovimGrid {
     private float guifontSize;
     private int guifontSets;
     private Frame frame;
+    /**
+     * The view's font size, and the 'guifont' option_set count it follows, so that a view recreated for the same
+     * session keeps a pinch made since the last option_set. Only the UI thread uses them; they are not in frames.
+     */
+    float viewFontSize;
+    int viewGuifontSets = -1;
 
     /** Until default_colors_set, frames use Neovim's built-in Normal colors for a dark or light background. */
     public NeovimGrid(boolean dark) {

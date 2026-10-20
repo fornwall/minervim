@@ -123,9 +123,11 @@ as CJK and symbols from fallback fonts, are drawn per cell: centred, or narrowed
 fit when wider than their cells. `linespace` adds space between rows in dp. Each
 time `guifont` is set, a size such as `:set guifont=:h16` sets the font size in sp,
 replacing a pinched size, and no size restores the pinched one; font names are
-ignored. Single, double, dotted and dashed underlines and
-strikethrough follow the font's line metrics and use the text color unless `guisp`
-sets one; undercurl is a wave. Overline is drawn, standout is drawn as reverse
+ignored. A recreated Activity keeps the current size, but Neovim sends `guifont`
+again at every UI attach, such as when the app is opened after its Activity
+finished, so its size then applies again. Single, double, dotted and dashed
+underlines and strikethrough follow the font's line metrics and use the text
+color unless `guisp` sets one; undercurl is a wave. Overline is drawn, standout is drawn as reverse
 video, and the block cursor is hollow while the editor or its window lacks focus.
 The editor takes focus at launch, while the soft keyboard waits for a tap.
 Cross-cell ligatures, cached row rendering, rich accessibility navigation, and full

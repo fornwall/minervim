@@ -33,6 +33,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -98,6 +99,38 @@ public final class SystemIntegrationTest {
             assertEquals(windows, request("nvim_exec_lua", layout, List.of()));
             assertEquals(resized, request("nvim_get_var", "resized"));
         }
+    }
+
+    @Test
+    public void recreationKeepsAFontSizeSetSinceTheLastGuifont() throws Exception {
+        configure("vim.g.resized = 0\n"
+                + "vim.api.nvim_create_autocmd('VimResized', { callback = function() vim.g.resized = vim.g.resized + 1 end })");
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi();
+            request("nvim_set_option_value", "guifont", ":h12", Map.of());
+            await(() -> fontSize(activity) == 12);
+            // As a pinch does when it ends.
+            activity.onActivity(a -> a.editorView().setFontSize(20));
+            String size = "return { vim.o.columns, vim.o.lines }";
+            await(() -> request("nvim_exec_lua", size, List.of()).equals(List.of(
+                    (long) onMain(activity, a -> a.editorView().columns()), (long) onMain(activity, a -> a.editorView().rows()))));
+            Object resized = request("nvim_get_var", "resized");
+
+            activity.recreate();
+            assertEquals(20, fontSize(activity), 0);
+            stableScreen(activity);
+            assertEquals(resized, request("nvim_get_var", "resized"));
+        }
+    }
+
+    private static float fontSize(ActivityScenario<MainActivity> activity) {
+        return onMain(activity, a -> a.editorView().fontSize());
+    }
+
+    private static <T> T onMain(ActivityScenario<MainActivity> activity, Function<MainActivity, T> function) {
+        AtomicReference<T> result = new AtomicReference<>();
+        activity.onActivity(a -> result.set(function.apply(a)));
+        return result.get();
     }
 
     @Test

@@ -496,15 +496,22 @@ public final class NeovimView extends View {
     public String screenText() {
         NeovimGrid.Frame frame = grid.frame();
         StringBuilder text = new StringBuilder();
-        boolean continued = false;
+        boolean continued = false, gap = false;
         for (int row = 0; row < frame.rows && text.length() < 32768; row++) {
-            int end = frame.columns;
-            if (!frame.wrapped(row)) while (end > 0 && frame.text(row, end - 1).isBlank()) end--;
-            if (end > 0 && !continued && text.length() > 0) text.append('\n');
-            for (int column = 0; column < end && text.length() < 32768; column++) {
+            int start = 0, end = frame.columns;
+            boolean blankEnd = false;
+            while (end > 0 && frame.text(row, end - 1).isBlank()) blankEnd |= !frame.text(row, --end).isEmpty();
+            if (continued) {
+                // Neovim hints a wrap whatever the number column, 'breakindent' or 'linebreak' padding, so the
+                // blanks at the joint become one space; a word split at the edge of a window without them stays whole.
+                while (start < end && frame.text(row, start).isBlank()) start++;
+                if (gap || start > 0) text.append(' ');
+            } else if (end > 0 && text.length() > 0) text.append('\n');
+            for (int column = start; column < end && text.length() < 32768; column++) {
                 text.append(frame.text(row, column));
             }
             continued = frame.wrapped(row);
+            gap = blankEnd;
         }
         return text.toString();
     }

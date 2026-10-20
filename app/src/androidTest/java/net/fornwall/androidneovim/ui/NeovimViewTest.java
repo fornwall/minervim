@@ -560,20 +560,26 @@ public class NeovimViewTest {
         });
     }
 
+    private static List<?> textLine(int row, String text, boolean wrap) {
+        return List.of("grid_line", List.of(1, row, 0, text.chars().mapToObj(c -> List.of(String.valueOf((char) c), 0)).toList(), wrap));
+    }
+
     @Test public void screenTextJoinsWrappedRows() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         instrumentation.runOnMainSync(() -> {
             NeovimView view = new NeovimView(instrumentation.getTargetContext());
-            view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 4, 4)),
-                    List.of("grid_line", List.of(1, 0, 0, List.of(List.of("a", 0), List.of("b"), List.of(" ", 0, 2)), true)),
-                    List.of("grid_line", List.of(1, 1, 0, List.of(List.of("c", 0, 4)), true)),
-                    List.of("grid_line", List.of(1, 2, 0, List.of(List.of("d", 0), List.of(" ", 0, 3)), false)),
-                    List.of("grid_line", List.of(1, 3, 0, List.of(List.of("e", 0), List.of(" ", 0, 3)), false)),
-                    List.of("flush", List.of())));
-            assertEquals("ab  ccccd\ne", view.screenText());
+            // Blanks at a joint, such as padding before a 'linebreak' break, become one space; a word split at
+            // the window edge stays whole.
+            view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 4, 4)), textLine(0, "ab  ", true), textLine(1, "cccc", true),
+                    textLine(2, "d   ", false), textLine(3, "e   ", false), List.of("flush", List.of())));
+            assertEquals("ab ccccd\ne", view.screenText());
             view.handleRedraw(List.of(List.of("grid_line", List.of(1, 0, 3, List.of(List.of("!", 0)), false)),
                     List.of("flush", List.of())));
             assertEquals("ab !\nccccd\ne", view.screenText());
+            // The number column and indent of a continuation row are not part of the line.
+            view.handleRedraw(List.of(List.of("grid_resize", List.of(1, 10, 2)), textLine(0, "  1 hello,", true),
+                    textLine(1, "    world ", false), List.of("flush", List.of())));
+            assertEquals("  1 hello, world", view.screenText());
         });
     }
 

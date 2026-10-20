@@ -54,8 +54,6 @@ public final class NeovimView extends View {
     private static final int WHEEL_LINES = 3, WHEEL_COLUMNS = 6;
     /** IME deletions, and the committed text they are counted over, are bounded to this many characters. */
     private static final int MAX_IME_DELETE = 256;
-    // Mode changes restart the IME only after it has been idle this long: Android drops what it sends meanwhile.
-    private static final long IME_IDLE_MS = 150;
     // Views send recurring accessibility events at most this often (ViewConfiguration's hidden interval).
     private static final long CONTENT_CHANGE_INTERVAL_MS = 100;
     private final NeovimGrid grid;
@@ -91,6 +89,9 @@ public final class NeovimView extends View {
     private boolean textEntry;
     private boolean modeRestartPending, composedForNewMode;
     private long imeActivity;
+    // Mode changes restart the IME only after it has been idle this long: Android drops what it sends meanwhile.
+    // Tests that type slowly lengthen it.
+    long imeIdleMs = 150;
     private final Runnable modeRestart = this::restartForMode;
     private int pendingAccent;
     private final BitSet handledKeys = new BitSet();
@@ -582,12 +583,12 @@ public final class NeovimView extends View {
 
     /**
      * A restart replaces the IME's connection, and Android drops what the IME still sends to the old one,
-     * such as the h of a quickly typed oh. So the restart waits until no connection was used for IME_IDLE_MS.
+     * such as the h of a quickly typed oh. So the restart waits until no connection was used for imeIdleMs.
      */
     private void restartForMode() {
         long idle = SystemClock.uptimeMillis() - imeActivity;
-        if (idle < IME_IDLE_MS) {
-            postDelayed(modeRestart, IME_IDLE_MS - idle);
+        if (idle < imeIdleMs) {
+            postDelayed(modeRestart, imeIdleMs - idle);
             return;
         }
         modeRestartPending = false;

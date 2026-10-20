@@ -82,6 +82,7 @@ public class NeovimViewTest {
             for (long deadline = SystemClock.uptimeMillis() + 5000; !activity.hasWindowFocus() && SystemClock.uptimeMillis() < deadline; ) {
                 SystemClock.sleep(20);
             }
+            assertTrue(activity.hasWindowFocus());
             NeovimView[] view = new NeovimView[1];
             InputLog input = new InputLog();
             main(() -> {
@@ -640,8 +641,12 @@ public class NeovimViewTest {
                                 List.of("flush", List.of())));
                     }
                 });
-                Thread.sleep(600);
-                assertEquals(batch[0] == 1 ? List.of(1) : List.of(1, 2), events);
+                List<Integer> expected = batch[0] == 1 ? List.of(1) : List.of(1, 2);
+                for (long deadline = SystemClock.uptimeMillis() + 5000; events.size() < expected.size()
+                        && SystemClock.uptimeMillis() < deadline; ) Thread.sleep(20);
+                // No further event follows within three intervals.
+                Thread.sleep(300);
+                assertEquals(expected, events);
             }
         } finally {
             automation.setOnAccessibilityEventListener(null);
@@ -658,6 +663,7 @@ public class NeovimViewTest {
             for (long deadline = SystemClock.uptimeMillis() + 5000; !activity.hasWindowFocus() && SystemClock.uptimeMillis() < deadline; ) {
                 SystemClock.sleep(20);
             }
+            assertTrue(activity.hasWindowFocus());
             instrumentation.runOnMainSync(() -> {
                 NeovimView view = new NeovimView(activity);
                 activity.addContentView(view, new ViewGroup.LayoutParams(200, 200));
@@ -754,6 +760,8 @@ public class NeovimViewTest {
         attachedOnTestThread((activity, view, input) -> {
             InputConnection[] connection = new InputConnection[1];
             main(() -> {
+                // Far longer than the pauses below, so a stalled test thread does not count as an idle IME.
+                view.imeIdleMs = 2000;
                 connection[0] = view.onCreateInputConnection(new EditorInfo());
                 // The o of a quickly typed "oh" enters Insert mode. Android would drop the h if the
                 // restart replaced the connection first.

@@ -147,6 +147,21 @@ public class NeovimGridTest {
         assertEquals(0xff555555, grid.frame().cursorBackground());
     }
 
+    @Test public void uiOptionsApplyWithTheNextFlush() {
+        NeovimGrid grid = new NeovimGrid();
+        grid.handleRedraw(List.of(event("option_set", "linespace", 3), event("option_set", "guifont", "Fira Code:h12.5:b,Mono:h9"),
+                event("option_set", "ext_cmdline", false)));
+        assertEquals(0, grid.frame().linespace);
+        assertEquals(0, grid.frame().guifontSize, 0);
+        grid.handleRedraw(List.of(flush()));
+        assertEquals(3, grid.frame().linespace);
+        assertEquals(12.5f, grid.frame().guifontSize, 0);
+        assertEquals(16, NeovimGrid.guifontSize(":h16"), 0);
+        assertEquals(0, NeovimGrid.guifontSize("Monospace"), 0);
+        assertEquals(0, NeovimGrid.guifontSize(":w8:hx,Mono:h9"), 0);
+        assertEquals(0, NeovimGrid.guifontSize(""), 0);
+    }
+
     @Test public void publishedHighlightsAreCopiedOnWrite() {
         NeovimGrid grid = new NeovimGrid();
         grid.handleRedraw(List.of(event("hl_attr_define", 1, Map.of("undercurl", true), Map.of(), List.of()),

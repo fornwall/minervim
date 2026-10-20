@@ -25,6 +25,8 @@ public final class NeovimGrid {
     private int mode = -1;
     private List<?> modes = List.of();
     private boolean busy;
+    private int linespace;
+    private float guifontSize;
     private Frame frame;
 
     /** Until default_colors_set, frames use Neovim's built-in Normal colors for a dark or light background. */
@@ -91,6 +93,10 @@ public final class NeovimGrid {
                     case "mode_change" -> {
                         mode = integer(args, 1);
                         applyMode();
+                    }
+                    case "option_set" -> {
+                        if ("linespace".equals(args.get(0)) && args.get(1) instanceof Number number) linespace = number.intValue();
+                        if ("guifont".equals(args.get(0)) && args.get(1) instanceof String font) guifontSize = guifontSize(font);
                     }
                     case "busy_start" -> busy = true;
                     case "busy_stop" -> busy = false;
@@ -196,7 +202,21 @@ public final class NeovimGrid {
         }
         highlightsShared = true;
         return new Frame(columns, rows, copiedText, copiedAttributes, highlights, foreground,
-                background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy);
+                background, special, cursorRow, cursorColumn, cursorShape, cursorPercentage, cursorAttribute, busy,
+                linespace, guifontSize);
+    }
+
+    /** The {@code :hN} size of the first 'guifont' entry, or 0. Font names are ignored. */
+    static float guifontSize(String guifont) {
+        String[] parts = guifont.split(",", 2)[0].split(":");
+        for (int i = 1; i < parts.length; i++) {
+            if (!parts[i].startsWith("h")) continue;
+            try {
+                float size = Float.parseFloat(parts[i].substring(1));
+                if (size > 0 && size < 1000) return size;
+            } catch (NumberFormatException ignored) { }
+        }
+        return 0;
     }
 
     private static int integer(List<?> list, int index) { return ((Number) list.get(index)).intValue(); }
@@ -239,18 +259,22 @@ public final class NeovimGrid {
         public final int columns, rows, foreground, background, special, cursorRow, cursorColumn, cursorPercentage, cursorAttribute;
         public final String cursorShape;
         public final boolean busy;
+        /** UI options: 'linespace', and the 'guifont' size (0 when unset). */
+        public final int linespace;
+        public final float guifontSize;
         private final String[][] text;
         private final int[][] attributes;
         private final Highlight[] highlights;
         private static final Highlight DEFAULT = new Highlight(Map.of());
         Frame(int columns, int rows, String[][] text, int[][] attributes, Highlight[] highlights,
                 int foreground, int background, int special, int cursorRow, int cursorColumn,
-                String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy) {
+                String cursorShape, int cursorPercentage, int cursorAttribute, boolean busy, int linespace, float guifontSize) {
             this.columns = columns; this.rows = rows; this.text = text; this.attributes = attributes;
             this.highlights = highlights; this.foreground = foreground; this.background = background;
             this.special = special; this.cursorRow = cursorRow; this.cursorColumn = cursorColumn;
             this.cursorShape = cursorShape; this.cursorPercentage = cursorPercentage;
             this.cursorAttribute = cursorAttribute; this.busy = busy;
+            this.linespace = linespace; this.guifontSize = guifontSize;
         }
         public String text(int row, int column) { return text[row][column]; }
         public int attribute(int row, int column) { return attributes[row][column]; }

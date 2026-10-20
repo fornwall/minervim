@@ -35,6 +35,14 @@ public class NeovimViewTest {
         @Override public void resize(int columns, int rows) { }
     }
 
+    private static final class ResizeLog implements NeovimView.Listener {
+        final List<String> sizes = new ArrayList<>();
+        @Override public void input(String input) { }
+        @Override public void paste(String text) { }
+        @Override public void mouse(String button, String action, String modifiers, int row, int column) { }
+        @Override public void resize(int columns, int rows) { sizes.add(columns + "x" + rows); }
+    }
+
     @Test public void hardwareKeysUseNeovimNotationAndLiteralLessThan() {
         var instrumentation = InstrumentationRegistry.getInstrumentation();
         instrumentation.runOnMainSync(() -> {
@@ -424,6 +432,31 @@ public class NeovimViewTest {
             int dotted = bands(bitmap, 6 * w + 1, 8 * w - 1).get(0).get(0), dashed = bands(bitmap, 8 * w, 10 * w).get(0).get(0);
             assertTrue(art(bitmap), runs(bitmap, dotted, 6 * w, 8 * w) > 4);
             assertEquals(art(bitmap), 2, runs(bitmap, dashed, 8 * w, 10 * w));
+        });
+    }
+
+    @Test public void linespaceAndGuifontSizeApplyWithTheFlushedFrame() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = sizedView(instrumentation.getTargetContext());
+            ResizeLog log = new ResizeLog();
+            view.setListener(log);
+            view.layout(0, 0, 1000, 1000);
+            float height = view.cellHeight(), size = view.fontSize();
+            int rows = view.rows();
+            assertEquals(List.of(view.columns() + "x" + rows), log.sizes);
+            view.handleRedraw(List.of(List.of("option_set", List.of("linespace", 4))));
+            assertEquals(height, view.cellHeight(), 0);
+            view.handleRedraw(List.of(List.of("flush", List.of())));
+            float density = instrumentation.getTargetContext().getResources().getDisplayMetrics().density;
+            assertEquals(height + Math.round(4 * density), view.cellHeight(), 0);
+            assertTrue(view.rows() < rows);
+            assertEquals(List.of(view.columns() + "x" + rows, view.columns() + "x" + view.rows()), log.sizes);
+            view.handleRedraw(List.of(List.of("option_set", List.of("guifont", "Monospace:h20")), List.of("flush", List.of())));
+            assertEquals(20, view.fontSize(), 0);
+            view.handleRedraw(List.of(List.of("option_set", List.of("guifont", "")), List.of("flush", List.of())));
+            assertEquals(size, view.fontSize(), 0);
+            assertEquals(4, log.sizes.size());
         });
     }
 }

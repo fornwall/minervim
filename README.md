@@ -83,7 +83,9 @@ The view uses Android's monospace font. It draws backgrounds in runs and, per
 highlight, ASCII and other characters that the font draws at the cell width (such as
 Latin, Greek and Cyrillic) in text runs scaled to the cell grid. Other clusters, such
 as CJK and symbols from fallback fonts, are drawn per cell: centred, or narrowed to
-fit when wider than their cells. Cross-cell ligatures, cached row rendering, rich
+fit when wider than their cells. `linespace` adds space between rows in dp, and a
+`guifont` size such as `:set guifont=:h16` sets the font size in sp until it is
+cleared; font names are ignored. Cross-cell ligatures, cached row rendering, rich
 accessibility navigation, and full IME surrounding-text behavior are future work.
 Single, double, dotted and dashed underlines and strikethrough follow the font's
 line metrics and use the text color unless `guisp` sets one; undercurl is a wave.

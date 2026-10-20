@@ -65,6 +65,9 @@ public final class NeovimView extends View {
     private float cellWidth;
     private float cellHeight;
     private float baseline;
+    private int linespace;
+    private float guifontSize;
+    private float curlAmplitude, curlMiddle;
     private float underlineTop, doubleUnderlineTop, underlineThickness, strikeTop, strikeThickness;
     private Listener listener;
     private ModifierListener modifierListener;
@@ -107,7 +110,7 @@ public final class NeovimView extends View {
         }
         curl.setStyle(Paint.Style.STROKE);
         curl.setStrokeWidth(Math.max(1, getResources().getDisplayMetrics().density));
-        fontSize = clampFontSize(context.getSharedPreferences("editor", Context.MODE_PRIVATE).getFloat("font_size_sp", 14));
+        fontSize = savedFontSize();
         applyFontSize();
         ViewConfiguration configuration = ViewConfiguration.get(context);
         touchSlop = configuration.getScaledTouchSlop();
@@ -127,6 +130,9 @@ public final class NeovimView extends View {
     }
 
     private static float clampFontSize(float size) { return Float.isNaN(size) ? 14 : Math.max(8, Math.min(32, size)); }
+    private float savedFontSize() {
+        return clampFontSize(getContext().getSharedPreferences("editor", Context.MODE_PRIVATE).getFloat("font_size_sp", 14));
+    }
 
     /** Sets the font size in sp, clamped to 8–32, and resizes the Neovim grid to fit. */
     public void setFontSize(float size) {
@@ -145,8 +151,13 @@ public final class NeovimView extends View {
         // Keep fractional advances, matching android-ssh's TerminalMetrics approach.
         cellWidth = textPaints[0].measureText("MMMMMMMMMM") / 10;
         Paint.FontMetrics metrics = textPaints[0].getFontMetrics();
-        cellHeight = (float) Math.ceil(metrics.descent - metrics.ascent);
-        baseline = cellHeight - metrics.descent;
+        int textHeight = (int) Math.ceil(metrics.descent - metrics.ascent);
+        // 'linespace' adds dp between rows, half of them above the text as in gvim.
+        int extra = Math.max(1 - textHeight, Math.min(3 * textHeight, Math.round(linespace * getResources().getDisplayMetrics().density)));
+        cellHeight = textHeight + extra;
+        baseline = textHeight - metrics.descent + extra / 2;
+        curlAmplitude = Math.max(1, textHeight / 16f);
+        curlMiddle = Math.min(cellHeight, textHeight + extra / 2) - curlAmplitude - curl.getStrokeWidth() / 2;
         // Decorations follow the font's metrics, on whole pixels and inside the cell.
         Paint regular = textPaints[0];
         underlineThickness = Math.min(cellHeight, Math.max(1, Math.round(regular.getUnderlineThickness())));
@@ -185,7 +196,18 @@ public final class NeovimView extends View {
     public void handleRedraw(List<?> events) {
         if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Redraw must run on main thread");
         if (!grid.handleRedraw(events)) return;
-        if (run.length < grid.frame().columns) run = new char[grid.frame().columns];
+        NeovimGrid.Frame frame = grid.frame();
+        if (run.length < frame.columns) run = new char[frame.columns];
+        // UI options change the cell metrics together with the frame that follows them.
+        if (frame.linespace != linespace) {
+            linespace = frame.linespace;
+            applyFontSize();
+            updateGridSize();
+        }
+        if (frame.guifontSize != guifontSize) {
+            guifontSize = frame.guifontSize;
+            setFontSize(guifontSize > 0 ? guifontSize : savedFontSize());
+        }
         postInvalidateOnAnimation();
     }
 
@@ -332,8 +354,7 @@ public final class NeovimView extends View {
                 }
             } else canvas.drawRect(left, top, right, top + thickness, fill);
         } else if (highlight.undercurl) {
-            float amplitude = Math.max(1, cellHeight / 16), half = cellWidth / 2;
-            float middle = y + cellHeight - amplitude - curl.getStrokeWidth() / 2;
+            float amplitude = curlAmplitude, half = cellWidth / 2, middle = y + curlMiddle;
             curlPath.rewind();
             curlPath.moveTo(left, middle);
             for (float x = left, sign = -1; x < right - 0.5f; x += half, sign = -sign) {

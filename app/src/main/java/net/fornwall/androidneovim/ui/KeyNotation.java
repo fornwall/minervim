@@ -19,7 +19,8 @@ final class KeyNotation {
     static String special(int keyCode) {
         return switch (keyCode) {
             case KeyEvent.KEYCODE_ESCAPE -> "Esc";
-            case KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> "CR";
+            case KeyEvent.KEYCODE_ENTER -> "CR";
+            case KeyEvent.KEYCODE_NUMPAD_ENTER -> "kEnter";
             case KeyEvent.KEYCODE_DEL -> "BS";
             case KeyEvent.KEYCODE_FORWARD_DEL -> "Del";
             case KeyEvent.KEYCODE_TAB -> "Tab";
@@ -33,6 +34,25 @@ final class KeyNotation {
             case KeyEvent.KEYCODE_PAGE_DOWN -> "PageDown";
             case KeyEvent.KEYCODE_INSERT -> "Insert";
             default -> keyCode >= KeyEvent.KEYCODE_F1 && keyCode <= KeyEvent.KEYCODE_F12 ? "F" + (keyCode - KeyEvent.KEYCODE_F1 + 1) : null;
+        };
+    }
+
+    /**
+     * The Neovim name of a keypad key that types {@code unicode}, such as {@code k5}, or null. Unmapped keypad keys
+     * act as that character in Neovim. Without Num Lock the digit keys type nothing and fall back to navigation keys.
+     */
+    static String keypad(int keyCode, int unicode) {
+        if (keyCode < KeyEvent.KEYCODE_NUMPAD_0 || keyCode > KeyEvent.KEYCODE_NUMPAD_EQUALS) return null;
+        return switch (unicode) {
+            case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> "k" + (char) unicode;
+            case '+' -> "kPlus";
+            case '-' -> "kMinus";
+            case '*' -> "kMultiply";
+            case '/' -> "kDivide";
+            case '.' -> "kPoint";
+            case ',' -> "kComma";
+            case '=' -> "kEqual";
+            default -> null;
         };
     }
 

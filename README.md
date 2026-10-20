@@ -54,8 +54,10 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   being composed is sent before another key, a tap, a sticky modifier, or focus
   loss. Outside Insert, Replace and command-line modes the soft keyboard is asked
   for plain keys, so a composing keyboard does not hold back commands such as
-  `dd`. On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, and right Alt
-  is Alt on layouts without AltGr characters (US, ChromeOS).
+  `dd`. On a hardware keyboard, Ctrl+Shift+letter is `<C-S-x>`, keypad keys
+  are `<k0>`–`<k9>`, `<kPlus>`, `<kEnter>` and so on (their characters unless
+  mapped), and right Alt is Alt on layouts without AltGr characters (US,
+  ChromeOS).
 - `FocusGained` and `FocusLost` fire when the app window gains or loses input
   focus, for example behind a dialog or when the app goes to the background.
 - When the app goes to the background, modified named file buffers are written

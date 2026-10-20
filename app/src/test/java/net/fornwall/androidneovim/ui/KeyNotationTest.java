@@ -22,6 +22,22 @@ public class KeyNotationTest {
         assertEquals("PageDown", KeyNotation.special(KeyEvent.KEYCODE_PAGE_DOWN));
         assertEquals("F12", KeyNotation.special(KeyEvent.KEYCODE_F12));
         assertNull(KeyNotation.special(KeyEvent.KEYCODE_A));
+        assertEquals("kEnter", KeyNotation.special(KeyEvent.KEYCODE_NUMPAD_ENTER));
+    }
+
+    @Test public void keypadKeysAreNamedByTheCharacterTheyType() {
+        assertEquals("k0", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_0, '0'));
+        assertEquals("k9", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_9, '9'));
+        assertEquals("kPlus", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_ADD, '+'));
+        assertEquals("kMinus", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, '-'));
+        assertEquals("kMultiply", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_MULTIPLY, '*'));
+        assertEquals("kDivide", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_DIVIDE, '/'));
+        assertEquals("kPoint", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_DOT, '.'));
+        // Layouts with a decimal comma type "," on the keypad's decimal key.
+        assertEquals("kComma", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_DOT, ','));
+        assertEquals("kEqual", KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_EQUALS, '='));
+        assertNull(KeyNotation.keypad(KeyEvent.KEYCODE_NUMPAD_LEFT_PAREN, '('));
+        assertNull(KeyNotation.keypad(KeyEvent.KEYCODE_5, '5'));
     }
 
     @Test public void modifiedAppliesToExactlyOneKey() {

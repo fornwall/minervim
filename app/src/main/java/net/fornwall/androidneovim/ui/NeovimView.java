@@ -448,6 +448,7 @@ public final class NeovimView extends View {
     /** Sends Neovim key notation. Active sticky modifiers apply to a single key, then clear. */
     public void sendKey(String keys) {
         commitComposition();
+        pendingAccent = 0;
         input(keys);
     }
 
@@ -698,6 +699,11 @@ public final class NeovimView extends View {
             return true;
         }
         if (unicode == 0) return false;
+        String keypad = KeyNotation.keypad(keyCode, unicode);
+        if (keypad != null) {
+            sendKey("<" + KeyNotation.modifiers(event.getMetaState(), true) + keypad + ">");
+            return true;
+        }
         commitComposition();
         if (pendingAccent != 0) {
             int combined = KeyCharacterMap.getDeadChar(pendingAccent, unicode);

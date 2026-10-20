@@ -831,4 +831,28 @@ public class NeovimViewTest {
             }
         });
     }
+
+    @Test public void keypadKeysUseKeypadNotationAndSpecialKeysCancelDeadKeys() {
+        var instrumentation = InstrumentationRegistry.getInstrumentation();
+        instrumentation.runOnMainSync(() -> {
+            NeovimView view = new NeovimView(instrumentation.getTargetContext());
+            InputLog input = new InputLog();
+            view.setListener(input);
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_5, key(KeyEvent.KEYCODE_NUMPAD_5, KeyEvent.META_NUM_LOCK_ON)));
+            // Without Num Lock, Android falls back to the navigation key printed on the keypad.
+            assertFalse(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_5, key(KeyEvent.KEYCODE_NUMPAD_5, 0)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_ADD, key(KeyEvent.KEYCODE_NUMPAD_ADD, 0)));
+            int ctrl = KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON;
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_MULTIPLY, key(KeyEvent.KEYCODE_NUMPAD_MULTIPLY, ctrl)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_NUMPAD_ENTER, key(KeyEvent.KEYCODE_NUMPAD_ENTER, 0)));
+            // The virtual keyboard layout has a dead acute accent on Alt+E.
+            int rightAlt = KeyEvent.META_ALT_ON | KeyEvent.META_ALT_RIGHT_ON;
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, 0)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, rightAlt)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_ESCAPE, key(KeyEvent.KEYCODE_ESCAPE, 0)));
+            assertTrue(view.onKeyDown(KeyEvent.KEYCODE_E, key(KeyEvent.KEYCODE_E, 0)));
+            assertEquals(List.of("<k5>", "<kPlus>", "<C-kMultiply>", "<kEnter>", "é", "<Esc>", "e"), input.keys);
+        });
+    }
 }

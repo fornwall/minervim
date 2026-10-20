@@ -44,6 +44,12 @@ if vim.g.clipboard == nil then
                       paste = { ['+'] = paste, ['*'] = paste } }
 end
 
+-- LuaJIT's os.exit() would end Neovim's thread without its teardown. Quit through Neovim instead.
+os.exit = function(code)
+  local status = (code == nil or code == true) and 0 or code == false and 1 or math.floor(tonumber(code) or 1)
+  vim.schedule(function() vim.cmd(status == 0 and 'qall!' or ('cquit ' .. status)) end)
+end
+
 -- Imported documents are local copies; report saves so Android can update the original.
 vim.api.nvim_create_autocmd('BufWritePost', { group = group, callback = function(event)
   local path = vim.fn.resolve(vim.fn.fnamemodify(event.match, ':p'))

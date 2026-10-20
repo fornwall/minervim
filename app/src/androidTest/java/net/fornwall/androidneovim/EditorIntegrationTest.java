@@ -269,6 +269,19 @@ public final class EditorIntegrationTest {
         }
     }
 
+    @Test
+    public void luaOsExitStopsTheEditorWithoutKillingAndroid() throws Exception {
+        int process = Process.myPid();
+        var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            awaitUi(session);
+            request(session, "nvim_exec_lua", "vim.schedule(function() os.exit(3) end)", List.of());
+            await(() -> onMain(session::stopped) && onMain(session::status).contains("exited (3)"));
+            assertEquals(process, Process.myPid());
+        }
+    }
+
     private static int inputClass(ActivityScenario<MainActivity> activity) {
         EditorInfo info = new EditorInfo();
         activity.onActivity(a -> a.editorView().onCreateInputConnection(info));

@@ -81,10 +81,10 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   `:TSInstall` needs a compiler and subprocesses.
 
 This is an embedding prototype. `:qa` stops the editor thread without exiting
-Android. Neovim's global state is not reinitialized in-process, so **Restart**
-then starts a fresh app process. There is no foreground service or
-background-survival guarantee. Edits made since the last background save are lost
-if Android ends the process; swap files are disabled.
+Android, and Lua's `os.exit()` quits the same way. Neovim's global state is not
+reinitialized in-process, so **Restart** then starts a fresh app process. There
+is no foreground service or background-survival guarantee. Edits made since the
+last background save are lost if Android ends the process; swap files are disabled.
 
 Ordinary subprocess launch paths are disabled, including shell commands, jobs,
 and terminal jobs. External language servers and process-based plugin providers
@@ -144,9 +144,9 @@ same-process execution, rejected subprocesses, runtime plugins, Tree-sitter
 parsers and their ftplugins, clipboard
 round-trips (including more lines than one RPC message may hold), CRLF paste,
 requests at a "Press ENTER" prompt, background saves, window focus events, IME
-line breaks and modes, and editor shutdown. UI tests also cover hardware key
-notation, sticky modifiers, IME lifecycle and deletions, mouse modifiers, touch
-and touchpad gestures, and accessibility.
+line breaks and modes, and editor shutdown, including Lua's `os.exit()`. UI tests
+also cover hardware key notation, sticky modifiers, IME lifecycle and deletions,
+mouse modifiers, touch and touchpad gestures, and accessibility.
 
 The initial device validation uses an API 37 x86-64 emulator. ARM64 is
 cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.

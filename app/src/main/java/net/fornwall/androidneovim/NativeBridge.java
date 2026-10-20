@@ -10,4 +10,7 @@ final class NativeBridge {
     static native void start(String filesDir, String socketPath);
 
     static native String failure();
+
+    /** Blocks until {@link #failure()} is set and returns it. */
+    static native String awaitFailure();
 }

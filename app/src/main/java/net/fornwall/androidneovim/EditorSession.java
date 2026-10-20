@@ -128,6 +128,7 @@ final class EditorSession implements NeovimView.Listener {
                 }
             }
             LocalSocket transport = connected;
+            watchNativeFailure(transport);
             NvimRpcClient client = new NvimRpcClient(
                     transport.getInputStream(), transport.getOutputStream(), main::post,
                     new NvimRpcClient.Listener() {
@@ -155,7 +156,8 @@ final class EditorSession implements NeovimView.Listener {
                             if (commands != null) commands.close(cause);
                             try { transport.close(); } catch (IOException ignored) { }
                             stopped = true;
-                            setStatus("Editor stopped. Restart the app to start a new session.", false);
+                            String failure = NativeBridge.failure();
+                            setStatus(failure != null ? failure : "Editor stopped. Restart the app to start a new session.", false);
                         }
                     });
             main.post(() -> {
@@ -184,6 +186,21 @@ final class EditorSession implements NeovimView.Listener {
                 ready.completeExceptionally(error);
             });
         }
+    }
+
+    /**
+     * Neovim's thread can end without closing its sockets, such as when an exit() skips its teardown.
+     * Shutting the socket down wakes the blocked reader, which close() does not.
+     */
+    private void watchNativeFailure(LocalSocket transport) {
+        Thread watcher = new Thread(() -> {
+            String failure = NativeBridge.awaitFailure();
+            try { transport.shutdownInput(); } catch (IOException ignored) { }
+            try { transport.shutdownOutput(); } catch (IOException ignored) { }
+            main.post(() -> { if (stopped) setStatus(failure, false); });
+        }, "neovim-exit");
+        watcher.setDaemon(true);
+        watcher.start();
     }
 
     private void copyAsset(String name, File destination) throws IOException {
@@ -225,6 +242,8 @@ final class EditorSession implements NeovimView.Listener {
     }
 
     boolean stopped() { return stopped; }
+
+    String status() { return status; }
 
     /** Opens a file once the editor has started; callbacks run on the main thread. */
     CompletableFuture<Object> edit(File file) {

@@ -14,6 +14,7 @@
 
 int nvim_main(int argc, char **argv);
 static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t failed = PTHREAD_COND_INITIALIZER;
 static bool started;
 static char failure_message[256];
 struct startup { char *files; char *socket; };
@@ -21,6 +22,7 @@ struct startup { char *files; char *socket; };
 static void fail(const char *message) {
   pthread_mutex_lock(&state_lock);
   snprintf(failure_message, sizeof failure_message, "%s", message);
+  pthread_cond_broadcast(&failed);
   pthread_mutex_unlock(&state_lock);
   __android_log_print(ANDROID_LOG_INFO, "AndroidNeovim", "%s", message);
 }
@@ -97,6 +99,19 @@ Java_net_fornwall_androidneovim_NativeBridge_failure(JNIEnv *env, jclass type) {
   jstring result = failure_message[0] ? (*env)->NewStringUTF(env, failure_message) : NULL;
   pthread_mutex_unlock(&state_lock);
   return result;
+}
+
+// Blocks until the editor has failed or ended. Its thread can end without closing
+// its sockets (an exit() skips teardown), so the UI cannot rely on EOF alone.
+JNIEXPORT jstring JNICALL
+Java_net_fornwall_androidneovim_NativeBridge_awaitFailure(JNIEnv *env, jclass type) {
+  (void)type;
+  char message[sizeof failure_message];
+  pthread_mutex_lock(&state_lock);
+  while (!failure_message[0]) pthread_cond_wait(&failed, &state_lock);
+  memcpy(message, failure_message, sizeof message);
+  pthread_mutex_unlock(&state_lock);
+  return (*env)->NewStringUTF(env, message);
 }
 
 // The first iteration intentionally supports an in-process editor only. Reject

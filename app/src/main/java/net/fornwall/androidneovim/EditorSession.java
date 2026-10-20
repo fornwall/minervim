@@ -198,9 +198,14 @@ final class EditorSession implements NeovimView.Listener {
     private void watchNativeFailure(LocalSocket transport) {
         Thread watcher = new Thread(() -> {
             String failure = NativeBridge.awaitFailure();
-            try { transport.shutdownInput(); } catch (IOException ignored) { }
-            try { transport.shutdownOutput(); } catch (IOException ignored) { }
-            main.post(() -> { if (stopped) setStatus(failure, false); });
+            // On the main thread and only while the session is open, so this cannot race closing the socket.
+            main.post(() -> {
+                if (stopped) setStatus(failure, false);
+                else if (rpc == null || !rpc.isClosed()) {
+                    try { transport.shutdownInput(); } catch (IOException ignored) { }
+                    try { transport.shutdownOutput(); } catch (IOException ignored) { }
+                }
+            });
         }, "neovim-exit");
         watcher.setDaemon(true);
         watcher.start();

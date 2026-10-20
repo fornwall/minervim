@@ -444,28 +444,10 @@ public final class NeovimView extends View {
 
     private void input(String keys) {
         if (stickyCtrl || stickyAlt) {
-            keys = modified(keys, stickyCtrl, stickyAlt);
+            keys = KeyNotation.modified(keys, stickyCtrl, stickyAlt);
             clearModifiers();
         }
         if (listener != null) listener.input(keys);
-    }
-
-    /** Adds modifiers to one key such as {@code <S-Tab>} or {@code :}; other input is returned unchanged. */
-    static String modified(String keys, boolean ctrl, boolean alt) {
-        String key, existing = "";
-        int last = keys.length() - 1;
-        if (last > 1 && keys.charAt(0) == '<' && keys.indexOf('<', 1) < 0 && keys.indexOf('>') == last) {
-            key = keys.substring(1, last);
-            while (key.length() > 2 && key.charAt(1) == '-' && "CAMDS".indexOf(Character.toUpperCase(key.charAt(0))) >= 0) {
-                existing += Character.toUpperCase(key.charAt(0));
-                key = key.substring(2);
-            }
-        } else if (!keys.isEmpty() && keys.codePointCount(0, keys.length()) == 1) {
-            key = keys.equals(" ") ? "Space" : keys;
-        } else return keys;
-        return "<" + (ctrl || existing.contains("C") ? "C-" : "")
-                + (alt || existing.contains("A") || existing.contains("M") ? "A-" : "")
-                + (existing.contains("D") ? "D-" : "") + (existing.contains("S") ? "S-" : "") + key + ">";
     }
 
     public void pasteClipboard() {
@@ -535,7 +517,7 @@ public final class NeovimView extends View {
             @Override public boolean commitText(CharSequence text, int newCursorPosition) {
                 if (!active()) return false;
                 composition = "";
-                if (text != null && text.length() > 0) input(literal(text.toString()));
+                if (text != null && text.length() > 0) input(KeyNotation.literal(text.toString()));
                 invalidate();
                 return true;
             }
@@ -544,7 +526,7 @@ public final class NeovimView extends View {
                 // Soft keyboards often compose single letters; a sticky modifier makes one a key now.
                 if ((stickyCtrl || stickyAlt) && composition.isEmpty() && text != null && text.length() > 0
                         && Character.codePointCount(text, 0, text.length()) == 1) {
-                    input(literal(text.toString()));
+                    input(KeyNotation.literal(text.toString()));
                     resetIme();
                     return true;
                 }
@@ -587,8 +569,6 @@ public final class NeovimView extends View {
         };
     }
 
-    static String literal(String text) { return text.replace("<", "<LT>"); }
-
     private void cancelComposition() {
         if (!composition.isEmpty()) resetIme();
     }
@@ -606,25 +586,9 @@ public final class NeovimView extends View {
             pasteClipboard();
             return true;
         }
-        String special = switch (keyCode) {
-            case KeyEvent.KEYCODE_ESCAPE -> "Esc";
-            case KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> "CR";
-            case KeyEvent.KEYCODE_DEL -> "BS";
-            case KeyEvent.KEYCODE_FORWARD_DEL -> "Del";
-            case KeyEvent.KEYCODE_TAB -> "Tab";
-            case KeyEvent.KEYCODE_DPAD_UP -> "Up";
-            case KeyEvent.KEYCODE_DPAD_DOWN -> "Down";
-            case KeyEvent.KEYCODE_DPAD_LEFT -> "Left";
-            case KeyEvent.KEYCODE_DPAD_RIGHT -> "Right";
-            case KeyEvent.KEYCODE_MOVE_HOME -> "Home";
-            case KeyEvent.KEYCODE_MOVE_END -> "End";
-            case KeyEvent.KEYCODE_PAGE_UP -> "PageUp";
-            case KeyEvent.KEYCODE_PAGE_DOWN -> "PageDown";
-            case KeyEvent.KEYCODE_INSERT -> "Insert";
-            default -> keyCode >= KeyEvent.KEYCODE_F1 && keyCode <= KeyEvent.KEYCODE_F12 ? "F" + (keyCode - KeyEvent.KEYCODE_F1 + 1) : null;
-        };
+        String special = KeyNotation.special(keyCode);
         if (special != null) {
-            sendKey("<" + modifiers(event, true) + special + ">");
+            sendKey("<" + KeyNotation.modifiers(event.getMetaState(), true) + special + ">");
             return true;
         }
         if (KeyEvent.isModifierKey(keyCode)) return true;
@@ -643,20 +607,15 @@ public final class NeovimView extends View {
         if (pendingAccent != 0) {
             int combined = KeyCharacterMap.getDeadChar(pendingAccent, unicode);
             if (combined != 0) unicode = combined;
-            else if (listener != null) listener.input(literal(new String(Character.toChars(pendingAccent))));
+            else if (listener != null) listener.input(KeyNotation.literal(new String(Character.toChars(pendingAccent))));
             pendingAccent = 0;
         }
         String text = new String(Character.toChars(unicode));
         if (modified) {
             String key = unicode == ' ' ? "Space" : unicode == '<' ? "LT" : text;
-            input("<" + modifiers(event, false) + key + ">");
-        } else input(literal(text));
+            input("<" + KeyNotation.modifiers(event.getMetaState(), false) + key + ">");
+        } else input(KeyNotation.literal(text));
         return true;
-    }
-
-    private static String modifiers(KeyEvent event, boolean shift) {
-        return (event.isCtrlPressed() ? "C-" : "") + (event.isAltPressed() ? "A-" : "")
-                + (event.isMetaPressed() ? "D-" : "") + (shift && event.isShiftPressed() ? "S-" : "");
     }
 
     @Override public boolean onKeyUp(int keyCode, KeyEvent event) {

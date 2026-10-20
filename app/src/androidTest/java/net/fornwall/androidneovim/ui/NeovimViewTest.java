@@ -59,7 +59,6 @@ public class NeovimViewTest {
                     KeyEvent.KEYCODE_TAB, 0, KeyEvent.META_SHIFT_ON));
             view.onKeyDown(KeyEvent.KEYCODE_ESCAPE, new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE));
             assertEquals(List.of("<C-a>", "<S-Tab>", "<Esc>"), input.keys);
-            assertEquals("a<LT>Esc>", NeovimView.literal("a<Esc>"));
         });
     }
 

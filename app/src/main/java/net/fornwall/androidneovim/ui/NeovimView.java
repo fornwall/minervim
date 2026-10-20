@@ -929,6 +929,9 @@ public final class NeovimView extends View {
 
     @Override protected void onDetachedFromWindow() {
         resetInput();
+        // A detached view announces nothing; the first flush after reattaching schedules a new event.
+        removeCallbacks(contentChanged);
+        contentChangePending = false;
         super.onDetachedFromWindow();
     }
 }

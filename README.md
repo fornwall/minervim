@@ -73,7 +73,9 @@ parallelism (default 8). Normal Gradle builds reuse these artifacts.
   matchparen, editorconfig, ...) load. The app's defaults (`number`, `mouse`,
   `linebreak`, `undofile`, ...) apply only to options the configuration did not
   set. There is no plugin installer; plugins can be copied under
-  `files/config/nvim/pack/`.
+  `files/config/nvim/pack/`. If a configuration error makes a setup step fail,
+  for example while reopening the last file, later steps still run and the error
+  is shown once the editor appears, so the configuration can be fixed.
 - Neovim's bundled Tree-sitter parsers (C, Lua, Markdown, query, Vimscript and
   Vim help) are linked into `libneovim.so`, so help and Markdown buffers get
   Tree-sitter highlighting and the `gO` outline. A `parser/<lang>.so` on the

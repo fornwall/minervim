@@ -3,9 +3,18 @@ local channel, home, notes, documents = ...
 -- Compare resolved paths: Android's files directory is reached through a symlink.
 home, documents = vim.fn.resolve(home), vim.fn.resolve(documents)
 local group = vim.api.nvim_create_augroup('android', { clear = true })
+-- User autocmds, ftplugins and syntax files can make a step fail. Later steps still run, and
+-- the errors are shown once the UI attaches, so a broken configuration stays editable.
+local errors = {}
+local function try(step, ...)
+  local ok, err = pcall(step, ...)
+  if not ok then errors[#errors + 1] = (tostring(err):gsub('\nstack traceback:.*', '')) end
+end
 -- App defaults, except where the user's configuration already chose a value.
 local function default(name, value)
-  if not vim.api.nvim_get_option_info2(name, {}).was_set then vim.o[name] = value end
+  try(function()
+    if not vim.api.nvim_get_option_info2(name, {}).was_set then vim.o[name] = value end
+  end)
 end
 default('termguicolors', true)
 default('mouse', 'a')
@@ -14,15 +23,17 @@ default('number', true)
 default('linebreak', true)
 default('breakindent', true)
 default('undofile', true)
-vim.opt.swapfile = false
-vim.opt.shortmess:append('I')
+try(function()
+  vim.opt.swapfile = false
+  vim.opt.shortmess:append('I')
+end)
 -- Relative paths such as `:e todo.txt` resolve inside app storage instead of `/`.
-vim.cmd.cd(vim.fn.fnameescape(home))
+try(vim.cmd.cd, vim.fn.fnameescape(home))
 if vim.fn.filereadable(vim.env.VIMRUNTIME .. '/doc/tags') == 0 then
-  vim.cmd.helptags(vim.fn.fnameescape(vim.env.VIMRUNTIME .. '/doc'))
+  try(vim.cmd.helptags, vim.fn.fnameescape(vim.env.VIMRUNTIME .. '/doc'))
 end
-vim.cmd('filetype plugin indent on')
-vim.cmd('syntax enable')
+try(vim.cmd, 'filetype plugin indent on')
+try(vim.cmd, 'syntax enable')
 
 -- The + and * registers use Android's clipboard through the UI channel; no clipboard tool runs.
 -- Text crosses as one string, so the number of lines is not limited by the RPC message size.
@@ -90,4 +101,12 @@ for _, file in ipairs(vim.v.oldfiles) do
     break
   end
 end
-vim.cmd.edit(vim.fn.fnameescape(start))
+try(vim.cmd.edit, vim.fn.fnameescape(start))
+
+if #errors > 0 then
+  vim.api.nvim_create_autocmd('UIEnter', { group = group, once = true, callback = function()
+    vim.schedule(function()
+      vim.notify('Android setup: ' .. table.concat(errors, '\n'), vim.log.levels.ERROR)
+    end)
+  end })
+end

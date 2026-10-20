@@ -11,6 +11,8 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -20,6 +22,27 @@ import org.junit.runner.RunWith;
 public final class SystemIntegrationTest {
     private final Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
     private final EditorSession session = ((EditorApplication) context.getApplicationContext()).session();
+
+    @Test
+    public void setupErrorsStillAttachTheUiAndShowTheError() throws Exception {
+        // Neovim starts with the first Activity, so a configuration written now is read at startup.
+        configure("vim.api.nvim_create_autocmd('BufReadPost', { pattern = '*/notes.txt', "
+                + "callback = function() error('BrokenConfigMarker') end })");
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            await(() -> screen(activity).replace("\n", "").contains("BrokenConfigMarker"));
+            // The multi-line error waits at a hit-enter prompt, which keys still reach.
+            assertEquals(Boolean.TRUE, ((Map<?, ?>) request("nvim_get_mode")).get("blocking"));
+            request("nvim_input", "<CR>");
+            awaitUi();
+            assertTrue(String.valueOf(request("nvim_buf_get_name", 0)).endsWith("notes.txt"));
+            // Steps after the failing one still ran, and documents can be opened.
+            assertEquals(context.getFilesDir().getCanonicalPath(), request("nvim_call_function", "getcwd", List.of()));
+            File other = new File(context.getFilesDir(), "other.txt");
+            Files.writeString(other.toPath(), "other\n");
+            session.edit(other).get(10, TimeUnit.SECONDS);
+            assertEquals(List.of("other"), request("nvim_buf_get_lines", 0, 0, -1, true));
+        }
+    }
 
     @Test
     public void recreationKeepsTheAttachedUiAndItsWindowLayout() throws Exception {

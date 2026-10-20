@@ -53,6 +53,7 @@ final class EditorSession implements NeovimView.Listener {
     private final CompletableFuture<Void> ready = new CompletableFuture<>();
     private String status = "Starting Neovim…";
     private boolean statusReady;
+    /** The editor cannot continue in this process; only Restart recovers. */
     private boolean stopped;
     /** The last text Neovim copied, so pasting it back keeps a linewise or blockwise register type. */
     private String copiedText;
@@ -187,22 +188,21 @@ final class EditorSession implements NeovimView.Listener {
                         .thenCompose(info -> client.request("nvim_exec_lua", init, List.of(((List<?>) info).get(0),
                                 home.getAbsolutePath(), notes.getAbsolutePath(), documents.directory.getAbsolutePath())))
                         .whenComplete((ignored, error) -> main.post(() -> {
-                            if (error != null) {
-                                setStatus("Editor setup failed: " + error.getMessage(), false);
-                                ready.completeExceptionally(error);
-                            } else {
-                                initialized = true;
-                                // Hiding the status row resizes the view. A posted task runs after that
-                                // layout, so the UI attaches at the final size.
-                                setStatus(READY, true);
-                                main.post(this::attachUi);
-                                ready.complete(null);
-                            }
+                            // init.lua shows its failed steps in Neovim. Attach regardless, so that a
+                            // broken configuration can still be edited.
+                            if (error != null) message("Android setup failed: " + rootMessage(error));
+                            initialized = true;
+                            // Hiding the status row resizes the view. A posted task runs after that
+                            // layout, so the UI attaches at the final size.
+                            if (!stopped) setStatus(READY, true);
+                            main.post(this::attachUi);
+                            ready.complete(null);
                         }));
             });
         } catch (Throwable error) {
             if (connected != null) try { connected.close(); } catch (IOException ignored) { }
             main.post(() -> {
+                stopped = true;
                 setStatus("Cannot start Neovim: " + error.getMessage(), false);
                 ready.completeExceptionally(error);
             });
@@ -267,6 +267,7 @@ final class EditorSession implements NeovimView.Listener {
                 .whenComplete((ignored, error) -> main.post(() -> {
                     if (error == null) return;
                     attached = false;
+                    stopped = true;
                     setStatus("Editor setup failed: " + error.getMessage(), false);
                 }));
         // Later window focus changes come from the view.

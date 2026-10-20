@@ -254,6 +254,23 @@ public final class SystemIntegrationTest {
             await(() -> "n".equals(((Map<?, ?>) request("nvim_get_mode")).get("mode")));
             await(() -> !backEscapes(activity));
             assertEquals(Lifecycle.State.RESUMED, activity.getState());
+
+            // Terminal mode passes <Esc> to the terminal, so Back sends <C-\><C-N>.
+            request("nvim_exec_lua", "vim.cmd.enew(); vim.api.nvim_open_term(0, {}); vim.cmd.startinsert()", List.of());
+            await(() -> "t".equals(((Map<?, ?>) request("nvim_get_mode")).get("mode")));
+            await(() -> backEscapes(activity));
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            await(() -> "nt".equals(((Map<?, ?>) request("nvim_get_mode")).get("mode")));
+            await(() -> !backEscapes(activity));
+
+            // Ex mode ignores <Esc>; without a mode change, the next Back goes to Android.
+            request("nvim_input", "gQ");
+            await(() -> "cv".equals(((Map<?, ?>) request("nvim_get_mode")).get("mode")));
+            await(() -> backEscapes(activity));
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);
+            await(() -> !backEscapes(activity));
+            assertEquals("cv", ((Map<?, ?>) request("nvim_get_mode")).get("mode"));
+            assertEquals(Lifecycle.State.RESUMED, activity.getState());
         }
     }
 

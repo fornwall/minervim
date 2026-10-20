@@ -38,9 +38,11 @@ public final class MainActivity extends Activity {
     private String exporting;
     // Back leaves Insert, Visual and other modes. In Normal mode, Android handles it, with its
     // predictive animation; that needs the callback registered ahead of the gesture.
-    private final OnBackInvokedCallback escape = () -> session.input("<Esc>");
+    private final OnBackInvokedCallback escape = this::escape;
     private boolean editorReady;
-    private boolean normalMode = true;
+    private String mode = "normal";
+    /** Back sent a key that has not changed the mode yet. */
+    private boolean escapePending;
     private boolean escapes;
 
     @Override
@@ -121,8 +123,9 @@ public final class MainActivity extends Activity {
                 updateBack();
             }
             @Override public void onMessage(String message) { message(message); }
-            @Override public void onModeChanged(String mode) {
-                normalMode = mode.equals("normal");
+            @Override public void onModeChanged(String next) {
+                mode = next;
+                escapePending = false;
                 updateBack();
             }
         });
@@ -154,8 +157,16 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void escape() {
+        // A terminal passes <Esc> on to its job; <C-\><C-N> leaves Terminal mode.
+        session.input(mode.equals("terminal") ? "<C-\\><C-N>" : "<Esc>");
+        // Some modes, such as Ex mode, ignore it. Until the mode changes, Back goes to Android.
+        escapePending = true;
+        updateBack();
+    }
+
     private void updateBack() {
-        boolean next = editorReady && !normalMode;
+        boolean next = editorReady && !escapePending && !mode.equals("normal");
         if (next == escapes) return;
         escapes = next;
         if (next) getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, escape);

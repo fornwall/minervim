@@ -373,14 +373,13 @@ final class EditorSession implements NeovimView.Listener {
         documents.written(local).whenComplete((result, error) -> main.post(() -> {
             if (error != null) message("Saved locally; updating the original failed: " + rootMessage(error));
             else switch (result) {
-                case UPDATED -> message("Saved " + local.getName());
                 case READ_ONLY -> message("Saved locally only: Android granted no write access to the original. "
                         + "Export saves a copy elsewhere.");
                 case CHANGED_ELSEWHERE -> message("Saved locally only: the original changed elsewhere. "
                         + "Use Export, or reopen it.");
                 case FORGOTTEN -> message("Saved locally only: this copy no longer updates its original. "
                         + "Use Export, or reopen it.");
-                case NONE -> { }
+                case NONE, UPDATED -> { }
             }
         }));
     }

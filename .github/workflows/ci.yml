@@ -37,7 +37,9 @@ jobs:
           cache-provider: basic
 
       - name: Install pinned Android SDK components
-        run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0' 'ndk;30.0.16248370'
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          'platforms;android-37.2' 'build-tools;37.0.0' 'ndk;30.0.16248370'
 
       - name: Build, run unit tests, and lint
         run: ./gradlew --no-daemon --stacktrace --console=plain --max-workers=2 build

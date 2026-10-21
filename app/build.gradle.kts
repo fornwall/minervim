@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
 }
 
+val nativeOutput = layout.buildDirectory.dir("generated/neovim")
+
 android {
     namespace = "com.minervim"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
@@ -25,22 +27,34 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     sourceSets.getByName("main") {
-        jniLibs.directories += layout.buildDirectory.dir("generated/neovim/jniLibs").get().asFile.path
-        assets.directories += layout.buildDirectory.dir("generated/neovim/assets").get().asFile.path
+        jniLibs.directories += nativeOutput.get().dir("jniLibs").asFile.path
+        assets.directories += nativeOutput.get().dir("assets").asFile.path
     }
     lint { disable += "UseKtx" }
     testOptions { execution = "ANDROIDX_TEST_ORCHESTRATOR" }
 }
 
+val nativeNdk = androidComponents.sdkComponents.ndkDirectory
+val nativeApi = android.defaultConfig.minSdk!!
+val nativeAbis = android.defaultConfig.ndk.abiFilters.sorted()
+
 val buildNeovim = tasks.register<Exec>("buildNeovim") {
     group = "build"
     description = "Builds the pinned Neovim core and runtime for Android."
     workingDir(rootProject.projectDir)
-    commandLine("bash", "native/build.sh")
+    commandLine(listOf(
+        "python3", "native/build.py",
+        "--ndk", nativeNdk.get().asFile.absolutePath,
+        "--api", nativeApi.toString(),
+        "--output", nativeOutput.get().asFile.absolutePath,
+    ) + nativeAbis)
+    inputs.property("ndkVersion", android.ndkVersion!!)
+    inputs.property("androidApi", nativeApi)
+    inputs.property("abis", nativeAbis)
     inputs.files(rootProject.fileTree("native") {
         exclude("work/**")
     })
-    outputs.dir(layout.buildDirectory.dir("generated/neovim"))
+    outputs.dir(nativeOutput)
 }
 
 tasks.named("preBuild") { dependsOn(buildNeovim) }

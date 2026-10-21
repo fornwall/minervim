@@ -31,8 +31,8 @@ if(ANDROID)
   BuildLuajit(INSTALL_COMMAND ${MAKE_PRG} -j8
     HOST_CC=cc
     TARGET_STRIP=${CMAKE_STRIP}
-    CC=${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/${android_cc_target}-clang
-    "AR=${CMAKE_AR} rcu"
+    CC=${ANDROID_TOOLCHAIN_ROOT}/bin/${android_cc_target}-clang
+    "TARGET_AR=${CMAKE_AR} rcus"
     TARGET_SYS=Linux
     BUILDMODE=static
     XCFLAGS=-fPIC

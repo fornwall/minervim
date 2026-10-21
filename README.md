@@ -6,13 +6,25 @@ one application process: Neovim owns a native thread, and a dedicated Android
 
 ## Build
 
-Requires Linux x86-64, JDK 25, CMake 3.24+, Ninja, Make, a host C compiler, Python 3,
-curl, and the Android SDK. Install these pinned SDK components:
+Build on Linux x86-64 or macOS (Apple Silicon or Intel) with JDK 25, CMake 3.24+,
+Ninja, GNU Make, a host C compiler, Python 3.8+, curl, tar, and the Android SDK.
+On macOS, install Xcode Command Line Tools (`xcode-select --install`); Homebrew
+can supply the remaining tools:
+
+```sh
+brew install openjdk@25 cmake ninja python
+export JAVA_HOME="$(brew --prefix openjdk@25)/libexec/openjdk.jdk/Contents/Home"
+```
+
+Point Gradle at the SDK with `sdk.dir` in your untracked `local.properties`
+(Android Studio creates this), or set `ANDROID_HOME`. The usual SDK location is
+`$HOME/Android/Sdk` on Linux and `$HOME/Library/Android/sdk` on macOS. Put the SDK's
+`cmdline-tools/latest/bin` and `platform-tools` on `PATH`, then install the pinned
+components and build:
 
 ```sh
 sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0' 'ndk;30.0.16248370'
-export ANDROID_HOME="$HOME/Android/Sdk"
-./gradlew assembleDebug
+./gradlew build
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -23,8 +35,17 @@ libraries use 16 KiB ELF alignment.
 The first build downloads checksum-pinned Neovim and its pinned dependencies,
 builds host code generators, and cross-compiles both ABIs. Intermediate native
 files live in ignored `native/work/`; Gradle's generated libraries and runtime
-live under `app/build/generated/neovim/`. `NEOVIM_BUILD_JOBS` controls native
-parallelism (default 8). Normal Gradle builds reuse these artifacts.
+live under `app/build/generated/neovim/`. Gradle passes its resolved NDK, minimum
+API and ABIs to the Python build script, so Android Studio and command-line
+builds use the same configuration. No GNU `flock` or `sha256sum` is needed.
+`NEOVIM_BUILD_JOBS` controls CMake build parallelism (default 8). Normal Gradle
+builds reuse these artifacts. Native build trees are separated by host OS and
+architecture, with target trees also separated by NDK version and ABI. Changing
+the upstream patch script rebuilds the native trees, including dependencies.
+`./gradlew clean` removes packaged outputs but retains the native cache; remove
+`native/work/` for a fully fresh native build. Downloads require network access
+on the first build. Source versions and checksums are pinned; host tools are not,
+so builds on different hosts are not guaranteed to be byte-identical.
 
 ## Use
 
@@ -196,8 +217,11 @@ and touchpad gestures, pinch, fallback glyphs, decorations, `linespace` and
 `guifont`, first frames in the system theme, the hollow cursor, and
 accessibility.
 
-The initial device validation uses an API 37 x86-64 emulator. ARM64 is
-cross-compiled and its ELF checked; it still needs testing on ARM64 hardware.
+The initial Linux build was validated on an API 37 x86-64 emulator. The macOS
+Apple Silicon build passes the full device suite on an API 37.2 ARM64 emulator
+with 16 KiB pages. Both packaged ABIs have their ELF and APK alignment checked;
+physical ARM64 hardware still needs validation. The updated build has not yet
+been tested on Linux or Intel macOS.
 
 Neovim and native dependency license notices are bundled in APK
 `assets/licenses/`. Upstream sources remain in the native build cache.

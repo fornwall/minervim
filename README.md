@@ -183,6 +183,10 @@ depend on `TerminalSession`, `libterm`, terminal modes, or scrollback.
 
 ## Verify
 
+GitHub Actions runs the build, JVM tests, and lint in a matrix on Linux x86-64
+(`ubuntu-24.04`) and macOS ARM64 (`macos-15`). Each host builds both Android ABIs
+and uploads its own build reports.
+
 ```sh
 ./gradlew build
 ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest

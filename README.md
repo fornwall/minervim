@@ -167,6 +167,13 @@ depend on `TerminalSession`, `libterm`, terminal modes, or scrollback.
 ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
 ```
 
+GitHub Actions runs `./gradlew build` for pull requests and pushes to `main` on
+Ubuntu 24.04 with JDK 25 and the pinned SDK components above. This builds both
+native ABIs and the debug/release APKs, runs JVM tests and Android lint, and
+uploads build reports for 14 days, including on failure. The workflow validates
+the Gradle wrapper and caches Gradle dependencies. Device tests remain a separate
+local check with the command above.
+
 Device tests run under the AndroidX Test Orchestrator with cleared app data:
 Neovim cannot restart in-process, so each test method gets a fresh process.
 JVM tests cover grid update semantics, key notation, the glyph advance cache,

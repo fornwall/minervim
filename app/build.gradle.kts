@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "net.fornwall.androidneovim"
+    namespace = "com.minervim"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     buildToolsVersion = "37.0.0"
     ndkVersion = "30.0.16248370"
 
     defaultConfig {
-        applicationId = "net.fornwall.androidneovim"
+        applicationId = "com.minervim"
         minSdk = 37
         targetSdk = 37
         versionCode = 1

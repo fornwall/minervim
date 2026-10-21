@@ -86,8 +86,8 @@ static char *copy_string(JNIEnv *env, jstring value) {
 }
 
 JNIEXPORT void JNICALL
-Java_net_fornwall_androidneovim_NativeBridge_start(JNIEnv *env, jclass type,
-                                                 jstring files_dir, jstring cache_dir, jstring socket_path) {
+Java_com_minervim_NativeBridge_start(JNIEnv *env, jclass type,
+                                    jstring files_dir, jstring cache_dir, jstring socket_path) {
   (void)type;
   pthread_mutex_lock(&state_lock);
   if (started) { pthread_mutex_unlock(&state_lock); return; }
@@ -116,7 +116,7 @@ Java_net_fornwall_androidneovim_NativeBridge_start(JNIEnv *env, jclass type,
 }
 
 JNIEXPORT jstring JNICALL
-Java_net_fornwall_androidneovim_NativeBridge_failure(JNIEnv *env, jclass type) {
+Java_com_minervim_NativeBridge_failure(JNIEnv *env, jclass type) {
   (void)type;
   pthread_mutex_lock(&state_lock);
   jstring result = failure_message[0] ? (*env)->NewStringUTF(env, failure_message) : NULL;
@@ -127,7 +127,7 @@ Java_net_fornwall_androidneovim_NativeBridge_failure(JNIEnv *env, jclass type) {
 // Blocks until the editor has failed or ended. Its thread can end without closing
 // its sockets (an exit() skips teardown), so the UI cannot rely on EOF alone.
 JNIEXPORT jstring JNICALL
-Java_net_fornwall_androidneovim_NativeBridge_awaitFailure(JNIEnv *env, jclass type) {
+Java_com_minervim_NativeBridge_awaitFailure(JNIEnv *env, jclass type) {
   (void)type;
   char message[sizeof failure_message];
   pthread_mutex_lock(&state_lock);

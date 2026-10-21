@@ -1,4 +1,4 @@
-# Android Neovim
+# Minervim
 
 An initial native Android Neovim editor. The Android UI and Neovim 0.12.6 run in
 one application process: Neovim owns a native thread, and a dedicated Android

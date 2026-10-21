@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <!-- Originals for document tests, served from the test package's own storage. -->
-        <provider android:name="net.fornwall.androidneovim.TestDocumentProvider"
-            android:authorities="net.fornwall.androidneovim.test.documents"
+        <provider android:name="com.minervim.TestDocumentProvider"
+            android:authorities="com.minervim.test.documents"
             android:exported="true" />
     </application>
 </manifest>
